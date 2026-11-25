@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CloudUpper</title>
+  <meta name="description" content="Dateien in Google Drive, OneDrive, HiDrive & Co. hochladen und von TorBox laden.">
+  <meta name="theme-color" content="#0f1220" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f6fb" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CloudUpper">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <aside class="nav" id="nav">
+      <div class="brand">
+        <img src="/icons/icon.svg" alt="" width="32" height="32">
+        <span>CloudUpper</span>
+      </div>
+      <button class="tab" data-view="upload"><i data-icon="upload"></i><span>Hochladen</span></button>
+      <button class="tab" data-view="torbox"><i data-icon="bolt"></i><span>TorBox</span></button>
+      <button class="tab" data-view="jobs"><i data-icon="list"></i><span>Aufträge</span><b class="badge" id="jobBadge" hidden></b></button>
+      <button class="tab" data-view="clouds"><i data-icon="cloud"></i><span>Clouds</span></button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 id="viewTitle">Hochladen</h1>
+        <div class="topbar-actions" id="topActions"></div>
+      </header>
+      <div id="view" class="view"></div>
+    </main>
+  </div>
+
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-action="sheet-close"></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <h2 id="sheetTitle"></h2>
+        <button class="icon-btn" data-action="sheet-close" aria-label="Schließen"><i data-icon="x"></i></button>
+      </div>
+      <div id="sheetBody" class="sheet-body"></div>
+    </div>
+  </div>
+
+  <div id="login" class="login" hidden>
+    <form class="login-card" id="loginForm">
+      <img src="/icons/icon.svg" alt="" width="64" height="64">
+      <h1>CloudUpper</h1>
+      <p class="muted">Bitte melde dich an.</p>
+      <input type="password" name="password" placeholder="Passwort" autocomplete="current-password" required>
+      <button class="btn primary block" type="submit">Anmelden</button>
+      <p class="error" id="loginError"></p>
+    </form>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
