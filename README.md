@@ -9,16 +9,49 @@ Self-hosted Web-App (Docker), mit der du
 
 Unter der Haube übernimmt [rclone](https://rclone.org) die Übertragungen – bewährt, schnell, mit Chunked Uploads, Wiederholungen und Token-Refresh.
 
-## Schnellstart
+## Installation auf Unraid
+
+Das Image wird per GitHub Actions automatisch gebaut und als `ghcr.io/kernelguru/cloudupper:latest` veröffentlicht.
+
+1. Im Unraid-Terminal das Template ablegen:
+   ```bash
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-CloudUpper.xml \
+     https://raw.githubusercontent.com/kernelguru/cloudupper/main/unraid/cloudupper.xml
+   ```
+2. **Docker → Add Container → Template: „CloudUpper“** auswählen.
+3. **Passwort** setzen, den Pfad **Dateien** (`/data`) auf deine Shares legen (z. B. `/mnt/user/` oder `/mnt/user/media/`), optional TorBox-API-Key eintragen → **Apply**.
+4. WebUI über das Container-Icon öffnen.
+
+Standardwerte passen zu Unraid: `PUID=99`, `PGID=100` (nobody:users), `UMASK=000`, Appdata unter `/mnt/user/appdata/cloudupper`. Der Container ändert keine Besitzrechte deiner Shares – nur neue Dateien (z. B. TorBox-Downloads) gehören `nobody:users`.
+
+> Ist das GHCR-Paket privat, lädt Unraid es nicht. Einmalig auf GitHub unter **Packages → cloudupper → Package settings → Change visibility → Public** stellen.
+
+## Docker Compose (andere Systeme)
 
 ```bash
-git clone <dieses-repo> cloudupper && cd cloudupper
 cp .env.example .env          # APP_PASSWORD setzen!
 # in docker-compose.yml den Pfad zu deinen Dateien eintragen (/pfad/zu/deinen/dateien)
-docker compose up -d --build
+docker compose up -d          # oder mit `build: .` lokal bauen
 ```
 
 Dann `http://<server-ip>:8080` öffnen.
+
+## Image bauen (GitHub Actions)
+
+`.github/workflows/docker.yml` läuft bei jedem Push auf `main`, bei Tags `v*`, bei Pull Requests (nur Test, kein Push) und manuell über **Actions → Docker-Image bauen → Run workflow**:
+
+1. Python-Syntaxprüfung
+2. Testbuild + Smoke-Test (Container starten, Login-Schutz, Weboberfläche, rclone prüfen)
+3. Build für `linux/amd64` und `linux/arm64`, Push nach GHCR
+
+Tags: `latest` (main), `1.2.3` / `1.2` (bei Git-Tag `v1.2.3`), Branch-Name, `sha-abc1234`. Eine neue Version veröffentlichst du mit `git tag v1.0.1 && git push --tags`. Ein Secret musst du nicht anlegen – es wird das eingebaute `GITHUB_TOKEN` verwendet.
+
+## Dateien auf dem Server werden nie automatisch gelöscht
+
+- Standard ist **kopieren** – die Originale bleiben auf dem Server.
+- Die Option **„Nach Upload auf dem Server löschen“** ist immer aus, muss pro Upload aktiv angehakt und bestätigt werden und wird danach wieder zurückgesetzt. Gelöscht wird erst, wenn der Upload erfolgreich war.
+- Zusätzlich gibt es im Server-Browser einen **Löschen-Button** für ausgewählte Dateien/Ordner – mit Bestätigungsdialog.
+- Nur der interne Zwischenspeicher für Uploads vom iPhone (`/config/staging`) wird automatisch aufgeräumt.
 
 | Volume    | Inhalt |
 |-----------|--------|
@@ -77,7 +110,7 @@ Download-Links werden erst beim Start eines Auftrags angefordert, damit sie nich
 | `RCLONE_FLAGS` | zusätzliche rclone-Optionen, z. B. `--bwlimit 20M --drive-chunk-size 64M` |
 | `NOTIFY_URL` | Push bei fertigen/fehlgeschlagenen Aufträgen, z. B. `https://ntfy.sh/dein-topic` (ntfy-App fürs iPhone) |
 | `GOOGLE_/ONEDRIVE_/HIDRIVE_/DROPBOX_CLIENT_ID/SECRET` | eigene OAuth-Apps |
-| `PUID` / `PGID` | Benutzer/Gruppe für Dateizugriffe (in `docker-compose.yml`, Standard 1000) |
+| `PUID` / `PGID` / `UMASK` | Benutzer/Gruppe/Rechte für neue Dateien (Standard 99/100/000 wie bei Unraid) |
 | `SESSION_DAYS` | Gültigkeit der Anmeldung (Standard 30) |
 
 ## HTTPS / Zugriff von unterwegs
@@ -96,7 +129,7 @@ Bei Nginx `client_max_body_size 64m;` setzen (Uploads kommen in 16-MB-Stücken).
 
 - Auftragswarteschlange mit Fortschritt, Geschwindigkeit, Restzeit, Abbrechen, Wiederholen
 - Aufträge laufen nach einem Container-Neustart automatisch weiter
-- „Verschieben“-Option: Dateien nach erfolgreichem Upload vom Server löschen
+- Löschen auf dem Server nur auf Wunsch (siehe oben)
 - Speicherplatzanzeige je Cloud
 - Ordner-Auswahl mit Breadcrumbs, „Neuer Ordner“, zuletzt verwendete Ziele
 - Light/Dark Mode, Offline-App-Shell, iOS-Home-Screen-Icon

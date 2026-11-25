@@ -3,14 +3,18 @@ ARG RCLONE_VERSION=1.68.2
 FROM rclone/rclone:${RCLONE_VERSION} AS rclone
 
 FROM python:3.12-slim
+LABEL org.opencontainers.image.title="CloudUpper" \
+      org.opencontainers.image.description="Dateien in Google Drive, OneDrive, HiDrive & Co. hochladen und von TorBox laden" \
+      org.opencontainers.image.source="https://github.com/kernelguru/cloudupper"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CONFIG_DIR=/config \
     DATA_DIR=/data \
     PORT=8080 \
     HOME=/tmp \
-    PUID=1000 \
-    PGID=1000
+    PUID=99 \
+    PGID=100 \
+    UMASK=000
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini \

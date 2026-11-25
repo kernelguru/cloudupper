@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>CloudUpper</Name>
+  <Repository>ghcr.io/kernelguru/cloudupper:latest</Repository>
+  <Registry>https://github.com/kernelguru/cloudupper/pkgs/container/cloudupper</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/kernelguru/cloudupper/issues</Support>
+  <Project>https://github.com/kernelguru/cloudupper</Project>
+  <Overview>Lädt Dateien vom Unraid-Server oder direkt vom iPhone in Google Drive, OneDrive, STRATO HiDrive, Dropbox, WebDAV/Nextcloud, SFTP, S3 und alle weiteren rclone-Dienste hoch – mit Zielordner-Auswahl. Lädt ausgewählte Dateien von TorBox auf den Server oder direkt in die Cloud. Schöne Weboberfläche, als App auf dem iPhone installierbar (Safari → Teilen → Zum Home-Bildschirm).&#xD;
+&#xD;
+Dateien auf dem Server werden nur gelöscht, wenn du das ausdrücklich auswählst.</Overview>
+  <Category>Cloud: Downloaders: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/kernelguru/cloudupper/main/unraid/cloudupper.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/kernelguru/cloudupper/main/app/static/icons/icon-512.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI-Port" Target="8080" Default="8080" Mode="tcp" Description="Port der Weboberfläche" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/cloudupper" Mode="rw" Description="rclone.conf (Cloud-Zugänge!), Einstellungen, Auftragsliste. Bitte mit sichern." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/cloudupper</Config>
+  <Config Name="Dateien" Target="/data" Default="/mnt/user/" Mode="rw" Description="Ordner, deren Dateien du hochladen möchtest. TorBox-Downloads auf den Server landen in /data/downloads. Z.B. /mnt/user/ oder /mnt/user/media/" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/</Config>
+  <Config Name="Passwort" Target="APP_PASSWORD" Default="" Mode="" Description="Passwort für die Weboberfläche. Unbedingt setzen!" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="TorBox API-Key" Target="TORBOX_API_KEY" Default="" Mode="" Description="Von torbox.app/settings. Kann auch später in der App eingetragen werden." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Öffentliche URL" Target="BASE_URL" Default="" Mode="" Description="Nur nötig für 'Mit … anmelden' (eigene OAuth-App) hinter einem Reverse Proxy, z.B. https://cloud.meinedomain.de" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Gleichzeitige Übertragungen" Target="MAX_PARALLEL" Default="2" Mode="" Description="Anzahl paralleler Uploads/Downloads" Type="Variable" Display="advanced" Required="false" Mask="false">2</Config>
+  <Config Name="rclone-Optionen" Target="RCLONE_FLAGS" Default="" Mode="" Description="Zusätzliche rclone-Optionen, z.B. --bwlimit 20M --drive-chunk-size 64M" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Benachrichtigungs-URL" Target="NOTIFY_URL" Default="" Mode="" Description="Push bei fertigen/fehlgeschlagenen Aufträgen, z.B. https://ntfy.sh/dein-geheimes-topic" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Google Client-ID" Target="GOOGLE_CLIENT_ID" Default="" Mode="" Description="Optional: eigene OAuth-App für Google Drive" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Google Client-Secret" Target="GOOGLE_CLIENT_SECRET" Default="" Mode="" Description="Optional" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="OneDrive Client-ID" Target="ONEDRIVE_CLIENT_ID" Default="" Mode="" Description="Optional: eigene OAuth-App für OneDrive" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="OneDrive Client-Secret" Target="ONEDRIVE_CLIENT_SECRET" Default="" Mode="" Description="Optional" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="HiDrive Client-ID" Target="HIDRIVE_CLIENT_ID" Default="" Mode="" Description="Optional: eigene OAuth-App für HiDrive" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="HiDrive Client-Secret" Target="HIDRIVE_CLIENT_SECRET" Default="" Mode="" Description="Optional" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Dropbox Client-ID" Target="DROPBOX_CLIENT_ID" Default="" Mode="" Description="Optional: eigene OAuth-App für Dropbox" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Dropbox Client-Secret" Target="DROPBOX_CLIENT_SECRET" Default="" Mode="" Description="Optional" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Benutzer-ID für neue Dateien (Unraid: 99 = nobody)" Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Gruppen-ID für neue Dateien (Unraid: 100 = users)" Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="000" Mode="" Description="Dateirechte für neue Dateien (Unraid-Standard 000)" Type="Variable" Display="advanced" Required="false" Mask="false">000</Config>
+</Container>

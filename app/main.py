@@ -160,6 +160,29 @@ async def mkdir(body: MkdirBody):
     return {"ok": True}
 
 
+class DeleteBody(BaseModel):
+    items: list[str]
+
+
+@app.post("/api/local/delete")
+async def local_delete(body: DeleteBody):
+    """Löscht Dateien/Ordner auf dem Server – nur auf ausdrücklichen Wunsch aus der Oberfläche."""
+    root = config.DATA_DIR.resolve()
+    targets = []
+    for item in body.items:
+        p = rclone.local_path(item)
+        if p == root or not p.exists():
+            raise HTTPException(400, f"Kann nicht gelöscht werden: {item}")
+        targets.append(p)
+    for p in targets:
+        if p.is_dir() and not p.is_symlink():
+            await asyncio.to_thread(shutil.rmtree, p)
+        else:
+            p.unlink()
+        log.info("Gelöscht auf Wunsch: %s", p)
+    return {"deleted": len(targets)}
+
+
 # ====================================================================== Clouds
 @app.get("/api/remotes")
 async def remotes():

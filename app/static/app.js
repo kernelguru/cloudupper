@@ -200,9 +200,10 @@ function viewLocal() {
       </div>
       ${L.loading ? `<div class="empty">Lade…</div>` : rows ? `<ul class="list">${rows}</ul>` : `<div class="empty">${icon("folder")}<br>Ordner ist leer.<br><span class="small">Lege Dateien in das gemountete Datenverzeichnis (${esc(S.status.data_dir || "/data")}).</span></div>`}
     </div>
-    <label class="check card" style="padding:12px 16px"><input type="checkbox" data-action="toggle-move" ${S.move ? "checked" : ""}> <span><b>Verschieben</b><br><span class="small muted">Dateien nach erfolgreichem Upload auf dem Server löschen</span></span></label>
+    <label class="check card" style="padding:12px 16px"><input type="checkbox" data-action="toggle-move" ${S.move ? "checked" : ""}> <span><b>Nach Upload auf dem Server löschen</b><br><span class="small muted">Standardmäßig aus – die Dateien bleiben auf dem Server erhalten.</span></span></label>
     <div class="actionbar">
       <div class="grow small"><b>${n}</b> ausgewählt${n ? ` <button class="btn ghost sm" data-action="local-clear">zurücksetzen</button>` : ""}</div>
+      ${n ? `<button class="icon-btn" data-action="local-delete" aria-label="Auf dem Server löschen" title="Auf dem Server löschen" style="color:var(--err)">${icon("trash")}</button>` : ""}
       <button class="btn primary" data-action="upload-server" ${n && S.dest.upload ? "" : "disabled"}>${icon("upload")} Hochladen</button>
     </div>`;
 }
@@ -225,12 +226,26 @@ async function loadLocal() {
 
 async function uploadServer() {
   const d = S.dest.upload;
+  if (S.move && !confirm(`Nach erfolgreichem Upload werden ${S.local.sel.size} Element(e) auf dem Server gelöscht. Fortfahren?`)) return;
   try {
     const r = await api("/upload/server", { body: { items: [...S.local.sel], remote: d.remote, path: d.path, move: S.move } });
     toast(`${r.jobs.length} Auftrag/Aufträge gestartet`, "ok");
     S.local.sel.clear();
+    S.move = false; // Löschen gilt immer nur für diesen einen Upload
     pollJobs(true);
     render();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function deleteLocal() {
+  const items = [...S.local.sel];
+  const list = items.slice(0, 8).map((p) => "• " + p).join("\n") + (items.length > 8 ? `\n… und ${items.length - 8} weitere` : "");
+  if (!confirm(`Diese ${items.length} Element(e) endgültig vom Server löschen?\n\n${list}`)) return;
+  try {
+    const r = await api("/local/delete", { body: { items } });
+    toast(`${r.deleted} Element(e) gelöscht`, "ok");
+    S.local.sel.clear();
+    loadLocal();
   } catch (e) { toast(e.message, "err"); }
 }
 
@@ -689,6 +704,7 @@ const actions = {
     render();
   },
   "local-clear": () => { S.local.sel.clear(); render(); },
+  "local-delete": () => deleteLocal(),
   "local-refresh": () => loadLocal(),
   "toggle-move": (el) => { S.move = el.checked; },
   "upload-server": () => uploadServer(),

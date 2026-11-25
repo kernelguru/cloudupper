@@ -31,9 +31,13 @@ _lock = threading.Lock()
 
 
 def ensure_dirs() -> None:
-    for d in (CONFIG_DIR, DATA_DIR, STAGING_DIR, RCLONE_CONFIG.parent):
+    for d in (CONFIG_DIR, STAGING_DIR, RCLONE_CONFIG.parent):
         d.mkdir(parents=True, exist_ok=True)
-    (DATA_DIR / DOWNLOAD_SUBDIR).mkdir(parents=True, exist_ok=True)
+    try:
+        (DATA_DIR / DOWNLOAD_SUBDIR).mkdir(parents=True, exist_ok=True)
+    except OSError as e:  # z.B. /data schreibgeschützt eingebunden
+        import logging
+        logging.getLogger("cloudupper").warning("Download-Ordner nicht anlegbar: %s", e)
     if not RCLONE_CONFIG.exists():
         RCLONE_CONFIG.touch(mode=0o600)
 

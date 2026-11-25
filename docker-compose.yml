@@ -1,16 +1,18 @@
 services:
   cloudupper:
-    build: .
-    image: cloudupper:latest
+    image: ghcr.io/kernelguru/cloudupper:latest
+    # Alternativ lokal bauen:
+    # build: .
     container_name: cloudupper
     restart: unless-stopped
     ports:
       - "8080:8080"
     env_file: .env
     environment:
-      # Benutzer/Gruppe, denen deine Dateien gehören (`id` auf dem Host; Unraid: 99/100)
-      - PUID=1000
-      - PGID=1000
+      # Benutzer/Gruppe für neue Dateien (`id` auf dem Host; Unraid: 99/100)
+      - PUID=99
+      - PGID=100
+      - UMASK=000
     volumes:
-      - ./config:/config            # rclone.conf, Einstellungen, Auftragsliste
-      - /pfad/zu/deinen/dateien:/data   # Diese Dateien kannst du hochladen; TorBox-Downloads landen in /data/downloads
+      - ./config:/config                 # rclone.conf, Einstellungen, Auftragsliste
+      - /pfad/zu/deinen/dateien:/data    # TorBox-Downloads landen in /data/downloads
