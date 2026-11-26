@@ -46,6 +46,28 @@ Dann `http://<server-ip>:8080` öffnen.
 
 Tags: `latest` (main), `1.2.3` / `1.2` (bei Git-Tag `v1.2.3`), Branch-Name, `sha-abc1234`. Eine neue Version veröffentlichst du mit `git tag v1.0.1 && git push --tags`. Ein Secret musst du nicht anlegen – es wird das eingebaute `GITHUB_TOKEN` verwendet.
 
+## Zeitgesteuerte Uploads
+
+Unter **Hochladen** Dateien/Ordner auswählen → **Planen**. Möglich sind:
+
+- **Einmalig** zu einem festen Zeitpunkt (z. B. heute Nacht 02:00)
+- **Wochentage**: Uhrzeit + beliebige Tage (täglich, werktags, Wochenende …)
+- **Intervall**: alle N Stunden, optional mit erstem Starttermin
+
+Pro Zeitplan lässt sich die **Bandbreite begrenzen** (z. B. `10M`), damit das Netz tagsüber frei bleibt. Bereits vorhandene, unveränderte Dateien werden bei jedem Lauf übersprungen – so wird ein Ordner zum nächtlichen Backup. Läuft der vorherige Durchgang noch, wird der neue übersprungen. Verpasste Einmal-Termine (Server war aus) laufen beim nächsten Start nach.
+
+Verwaltet werden die Zeitpläne unter **Aufträge → Zeitpläne**: pausieren, sofort ausführen, bearbeiten, löschen, Ergebnis des letzten Laufs. Die Uhrzeit gilt in der Zeitzone des Geräts, auf dem der Zeitplan angelegt wurde.
+
+## Cloud-Explorer
+
+Der Tab **Explorer** zeigt Server und alle verbundenen Clouds:
+
+- Ordner durchsuchen, filtern, nach Name/Datum/Größe sortieren, neue Ordner anlegen
+- Dateien **ansehen/öffnen** und **herunterladen** (auch aufs iPhone)
+- **Umbenennen**, **Löschen** (mit Bestätigung)
+- **Kopieren oder Verschieben** – auch **von Cloud zu Cloud** (z. B. OneDrive → HiDrive) oder aus der Cloud auf den Server; läuft als Auftrag im Hintergrund
+- **Freigabelink** erstellen (Google Drive, OneDrive, Dropbox, HiDrive …) und direkt über das iOS-Teilen-Menü versenden
+
 ## Dateien auf dem Server werden nie automatisch gelöscht
 
 - Standard ist **kopieren** – die Originale bleiben auf dem Server.
@@ -131,6 +153,8 @@ Bei Nginx `client_max_body_size 64m;` setzen (Uploads kommen in 16-MB-Stücken).
 - Aufträge laufen nach einem Container-Neustart automatisch weiter
 - Löschen auf dem Server nur auf Wunsch (siehe oben)
 - Speicherplatzanzeige je Cloud
+- Zeitpläne (einmalig, Wochentage, Intervall) mit Bandbreitenlimit
+- Cloud-Explorer inkl. Cloud-zu-Cloud-Kopieren und Freigabelinks
 - Ordner-Auswahl mit Breadcrumbs, „Neuer Ordner“, zuletzt verwendete Ziele
 - Light/Dark Mode, Offline-App-Shell, iOS-Home-Screen-Icon
 - API-Dokumentation unter `/api/docs`
@@ -146,7 +170,5 @@ CONFIG_DIR=./config DATA_DIR=./data APP_PASSWORD=test uvicorn app.main:app --rel
 
 - **Native iOS-App** per Capacitor-Wrapper (gleiche Oberfläche) inkl. **Share-Extension**: „Teilen → CloudUpper“ direkt aus Fotos/Dateien und echte Hintergrund-Uploads
 - **Automatische Regeln**: neue TorBox-Downloads automatisch in Cloud X / Ordner Y; Watch-Folder auf dem Server
-- **Geplante Syncs/Backups** (z. B. nachts `/data/fotos` → Google Drive) mit Zeitplan
-- **Cloud-zu-Cloud-Transfers** (z. B. OneDrive → HiDrive) – rclone kann das bereits, es fehlt nur die UI
 - Verschlüsselte Ziele mit rclone **crypt** (Ende-zu-Ende verschlüsselt in der Cloud)
 - Mehrbenutzerbetrieb, Passkeys/2FA, Telegram-Bot zum Hinzufügen von Magnet-Links

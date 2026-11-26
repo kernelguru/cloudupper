@@ -21,11 +21,19 @@ MAX_PARALLEL = max(1, int(os.getenv("MAX_PARALLEL", "2")))
 NOTIFY_URL = os.getenv("NOTIFY_URL", "")  # z.B. https://ntfy.sh/mein-topic
 SESSION_DAYS = int(os.getenv("SESSION_DAYS", "30"))
 
+try:
+    from zoneinfo import ZoneInfo
+    TZINFO = ZoneInfo(os.getenv("TZ") or "Europe/Berlin")
+except Exception:  # noqa: BLE001 – unbekannte Zeitzone
+    from datetime import timezone as _tz
+    TZINFO = _tz.utc
+
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
+SCHEDULES_FILE = CONFIG_DIR / "schedules.json"
 JOBS_FILE = CONFIG_DIR / "jobs.json"
 SECRET_FILE = CONFIG_DIR / "secret.key"
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 _lock = threading.Lock()
 

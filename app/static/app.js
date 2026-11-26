@@ -28,6 +28,18 @@ const ICONS = {
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  compass: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M8 4v5"/>',
+  share: '<path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
+  pencil: '<path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  play: '<path d="M7 5v14l11-7L7 5Z"/>',
+  pause: '<path d="M8 5v14M16 5v14"/>',
+  more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5L5 20"/>',
+  video: '<rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3"/>',
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>',
 };
 const icon = (n, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ""}</svg>`;
 function hydrateIcons(root = document) {
@@ -109,10 +121,13 @@ const S = {
   recent: store.get("recentDest", []),
   torbox: { kind: "torrents", items: [], sel: new Map(), open: new Set(), filter: "", loading: false, error: "" },
   about: {},
+  jobsTab: "jobs",
+  schedules: [],
+  ex: { remote: store.get("ex.remote", null), path: "", entries: [], sel: new Map(), filter: "", sort: store.get("ex.sort", "name"), loading: false, error: "" },
 };
 
 // ------------------------------------------------------------------ Navigation
-const TITLES = { upload: "Hochladen", torbox: "TorBox", jobs: "Aufträge", clouds: "Clouds" };
+const TITLES = { upload: "Hochladen", explorer: "Explorer", torbox: "TorBox", jobs: "Aufträge", clouds: "Clouds" };
 function go(view) {
   S.view = view;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
@@ -123,6 +138,7 @@ function go(view) {
   if (view === "torbox") loadTorbox();
   if (view === "clouds") loadAbout();
   if (view === "jobs") pollJobs();
+  if (view === "explorer") loadExplorer();
   window.scrollTo({ top: 0 });
 }
 
@@ -132,9 +148,10 @@ function render() {
   top.innerHTML = "";
   if (v === "upload" && S.uploadMode === "server") top.innerHTML = `<button class="icon-btn" data-action="local-refresh" aria-label="Aktualisieren">${icon("refresh")}</button>`;
   if (v === "torbox") top.innerHTML = `<button class="icon-btn" data-action="tb-refresh" aria-label="Aktualisieren">${icon("refresh", S.torbox.loading ? "spin" : "")}</button>`;
-  if (v === "jobs") top.innerHTML = `<button class="btn sm" data-action="jobs-clear">Erledigte entfernen</button>`;
+  if (v === "jobs" && S.jobsTab === "jobs") top.innerHTML = `<button class="btn sm" data-action="jobs-clear">Erledigte entfernen</button>`;
+  if (v === "explorer") top.innerHTML = `<button class="icon-btn" data-action="ex-refresh" aria-label="Aktualisieren">${icon("refresh", S.ex.loading ? "spin" : "")}</button>`;
   if (v === "clouds" && S.status.auth) top.innerHTML = `<button class="icon-btn" data-action="logout" aria-label="Abmelden">${icon("logout")}</button>`;
-  $("#view").innerHTML = ({ upload: viewUpload, torbox: viewTorbox, jobs: viewJobs, clouds: viewClouds })[v]();
+  $("#view").innerHTML = ({ upload: viewUpload, explorer: viewExplorer, torbox: viewTorbox, jobs: viewJobsTabs, clouds: viewClouds })[v]();
 }
 
 let renderQueued = false;
@@ -204,7 +221,8 @@ function viewLocal() {
     <div class="actionbar">
       <div class="grow small"><b>${n}</b> ausgewählt${n ? ` <button class="btn ghost sm" data-action="local-clear">zurücksetzen</button>` : ""}</div>
       ${n ? `<button class="icon-btn" data-action="local-delete" aria-label="Auf dem Server löschen" title="Auf dem Server löschen" style="color:var(--err)">${icon("trash")}</button>` : ""}
-      <button class="btn primary" data-action="upload-server" ${n && S.dest.upload ? "" : "disabled"}>${icon("upload")} Hochladen</button>
+      <button class="btn" data-action="upload-plan" title="Zeitgesteuert hochladen" ${n && S.dest.upload ? "" : "disabled"}>${icon("clock")}<span class="lbl">Planen</span></button>
+      <button class="btn primary" data-action="upload-server" ${n && S.dest.upload ? "" : "disabled"}>${icon("upload")} Jetzt</button>
     </div>`;
 }
 
@@ -348,10 +366,10 @@ async function startDeviceUploads() {
 // ------------------------------------------------------------------ Ordner-Auswahl
 const picker = { ctx: null, remote: "", path: "", entries: [], loading: false, error: "" };
 
-function openPicker(ctx) {
-  const cur = S.dest[ctx] || { remote: S.remotes[0]?.name || "", path: "" };
-  Object.assign(picker, { ctx, remote: cur.remote, path: cur.path, entries: [], error: "" });
-  openSheet("Zielordner wählen", "");
+function openPicker(ctx, opts = {}) {
+  const cur = opts.initial || S.dest[ctx] || { remote: S.remotes[0]?.name || "", path: "" };
+  Object.assign(picker, { ctx, remote: cur.remote, path: cur.path, entries: [], error: "", onChoose: opts.onChoose || null, button: opts.button || "Hier speichern" });
+  openSheet(opts.title || "Zielordner wählen", "");
   loadPicker();
 }
 
@@ -381,20 +399,22 @@ function renderPicker() {
       <div class="crumbs">${crumbs}</div>
       ${picker.loading ? `<div class="empty">Lade…</div>` : picker.error ? `<div class="empty error">${esc(picker.error)}</div>` : rows ? `<ul class="list">${rows}</ul>` : `<div class="empty">Keine Unterordner</div>`}
     </div>
-    <div class="sheet-foot stack">
+`;
+  const typed = $("#pkNew")?.value || "";
+  setSheetFoot(`
       <div class="row">
-        <input type="text" placeholder="Neuer Ordner…" id="pkNew" enterkeyhint="done">
+        <input type="text" placeholder="Neuer Ordner…" id="pkNew" enterkeyhint="done" value="${esc(typed)}">
         <button class="btn" data-action="pk-mkdir">${icon("folderPlus")}</button>
       </div>
-      <button class="btn primary block" data-action="pk-choose">${icon("check")} <span class="ellipsis">Hier speichern: ${esc(destLabel({ remote: picker.remote, path: picker.path }))}</span></button>
-    </div>`;
+      <button class="btn primary block" data-action="pk-choose">${icon("check")} <span class="ellipsis">${esc(picker.button)}: ${esc(destLabel({ remote: picker.remote, path: picker.path }))}</span></button>`);
 }
 
 function chooseDest(d) {
-  S.dest[picker.ctx] = d;
-  store.set("dest." + picker.ctx, d);
   S.recent = [d, ...S.recent.filter((x) => x.remote !== d.remote || x.path !== d.path)].slice(0, 6);
   store.set("recentDest", S.recent);
+  if (picker.onChoose) { const cb = picker.onChoose; picker.onChoose = null; cb(d); return; }
+  S.dest[picker.ctx] = d;
+  store.set("dest." + picker.ctx, d);
   closeSheet();
   render();
 }
@@ -529,6 +549,7 @@ async function pollJobs(force = false) {
       done.forEach((j) => toast(`${j.status === "done" ? "Fertig" : "Fehlgeschlagen"}: ${j.title}`, j.status === "done" ? "ok" : "err"));
     }
     lastActive = active;
+    if (S.view === "jobs" && S.jobsTab === "schedules") S.schedules = await api("/schedules");
     if (S.view === "jobs") render();
     jobTimer = setTimeout(pollJobs, active ? 1500 : 8000);
   } catch {
@@ -666,9 +687,15 @@ async function afterConnect(msg) {
 }
 
 // ------------------------------------------------------------------ Sheet
+function setSheetFoot(html) {
+  const f = $("#sheetFoot");
+  f.innerHTML = html || "";
+  f.hidden = !html;
+}
 function openSheet(title, html) {
   $("#sheetTitle").textContent = title;
   $("#sheetBody").innerHTML = html;
+  setSheetFoot("");
   $("#sheet").hidden = false;
   document.body.style.overflow = "hidden";
 }
@@ -837,15 +864,18 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("input", (e) => {
   const k = e.target.dataset?.input;
-  if (k === "local-filter" || k === "tb-filter") {
+  if (k === "local-filter" || k === "tb-filter" || k === "ex-filter") {
     const pos = e.target.selectionStart;
-    if (k === "local-filter") S.local.filter = e.target.value; else S.torbox.filter = e.target.value;
+    if (k === "local-filter") S.local.filter = e.target.value;
+    else if (k === "tb-filter") S.torbox.filter = e.target.value;
+    else S.ex.filter = e.target.value;
     render();
     const inp = $(`[data-input="${k}"]`);
     inp.focus(); inp.setSelectionRange(pos, pos);
   }
 });
 document.addEventListener("change", (e) => {
+  if (e.target.dataset?.input === "ex-sort") { S.ex.sort = e.target.value; store.set("ex.sort", S.ex.sort); render(); return; }
   if (e.target.dataset?.input === "dev-files") { addDeviceFiles(e.target.files); e.target.value = ""; }
 });
 document.addEventListener("keydown", (e) => {
@@ -866,6 +896,316 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) poll
 window.addEventListener("hashchange", () => {
   const v = location.hash.slice(1).split("?")[0];
   if (TITLES[v] && v !== S.view) go(v);
+});
+
+// ================================================================== Zeitpläne
+const WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const pad = (n) => String(n).padStart(2, "0");
+const localInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const fmtWhen = (ts) => ts ? new Date(ts * 1000).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "–";
+
+function viewJobsTabs() {
+  const seg = `<div class="seg">
+    <button class="${S.jobsTab === "jobs" ? "active" : ""}" data-action="jobs-tab" data-tab="jobs">${icon("list")} Aufträge</button>
+    <button class="${S.jobsTab === "schedules" ? "active" : ""}" data-action="jobs-tab" data-tab="schedules">${icon("clock")} Zeitpläne${S.schedules.filter((x) => x.enabled).length ? ` (${S.schedules.filter((x) => x.enabled).length})` : ""}</button>
+  </div>`;
+  return seg + (S.jobsTab === "jobs" ? viewJobs() : viewSchedules());
+}
+
+function viewSchedules() {
+  const hint = `<p class="small muted" style="margin:0">Neuen Zeitplan anlegen: unter <a href="#upload" data-action="nav" data-view="upload">Hochladen</a> Dateien/Ordner auswählen → <b>${icon("clock")} Planen</b>. Bereits vorhandene Dateien werden bei jedem Lauf übersprungen – ideal für nächtliche Backups.</p>`;
+  if (!S.schedules.length) return `<div class="card empty">${icon("clock")}<br>Noch keine Zeitpläne.</div>` + hint;
+  return S.schedules.map((sc) => {
+    const res = sc.last_result || {};
+    const resChips = [["done", "ok", "fertig"], ["running", "run", "läuft"], ["queued", "", "wartet"], ["failed", "err", "Fehler"], ["canceled", "warn", "abgebrochen"]]
+      .filter(([k]) => res[k]).map(([k, c, l]) => `<span class="chip ${c}">${res[k]} ${l}</span>`).join("");
+    const src = sc.items.length === 1 ? sc.items[0] : `${sc.items.length} Quellen (${sc.items.slice(0, 2).join(", ")}${sc.items.length > 2 ? ", …" : ""})`;
+    return `<div class="card stack" style="gap:8px">
+      <div class="row">
+        <div class="ico" style="width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:${sc.enabled ? "var(--accent-soft)" : "var(--card-2)"};color:${sc.enabled ? "var(--accent)" : "var(--muted)"}">${icon("clock")}</div>
+        <div class="grow"><div class="ellipsis"><b>${esc(sc.name)}</b></div><div class="small muted">${esc(sc.description)}${sc.bwlimit ? ` · max. ${esc(sc.bwlimit)}B/s` : ""}${sc.move ? ` · <span style="color:var(--err)">löscht nach Upload</span>` : ""}</div></div>
+        <span class="chip ${sc.enabled ? "run" : ""}">${sc.enabled ? "aktiv" : "pausiert"}</span>
+      </div>
+      <div class="route small muted row wrap" style="gap:6px"><span class="ellipsis">Server:/${esc(src)}</span>${icon("arrow")}<span class="ellipsis">${esc(sc.dest_label)}</span></div>
+      <div class="small"><span class="muted">Nächster Lauf:</span> <b>${sc.enabled ? fmtWhen(sc.next_run) : "–"}</b>
+        ${sc.last_run ? `<br><span class="muted">Letzter Lauf:</span> ${fmtWhen(sc.last_run)} · ${esc(sc.last_status)}` : ""}</div>
+      ${resChips ? `<div class="chips">${resChips}</div>` : ""}
+      <div class="row" style="justify-content:flex-end;gap:6px">
+        <button class="btn sm" data-action="sc-toggle" data-id="${sc.id}">${icon(sc.enabled ? "pause" : "play")} ${sc.enabled ? "Pausieren" : "Aktivieren"}</button>
+        <button class="btn sm" data-action="sc-run" data-id="${sc.id}" title="Jetzt ausführen">${icon("upload")} Jetzt</button>
+        <button class="icon-btn" data-action="sc-edit" data-id="${sc.id}" aria-label="Bearbeiten">${icon("pencil")}</button>
+        <button class="icon-btn" style="color:var(--err)" data-action="sc-delete" data-id="${sc.id}" aria-label="Löschen">${icon("trash")}</button>
+      </div>
+    </div>`;
+  }).join("") + hint;
+}
+
+let sc = null; // Entwurf im Zeitplan-Dialog
+function defaultNight() {
+  const d = new Date(); d.setHours(2, 0, 0, 0);
+  if (d <= new Date()) d.setDate(d.getDate() + 1);
+  return localInput(d);
+}
+function openScheduleSheet(draft) {
+  const t = draft.timing || {};
+  sc = {
+    id: draft.id || null, name: draft.name || "", items: draft.items, remote: draft.remote, path: draft.path,
+    move: !!draft.move, bwlimit: draft.bwlimit || "", type: t.type || "weekly",
+    at: t.type === "once" ? t.at : defaultNight(), time: t.time || "02:00", days: t.days || [0, 1, 2, 3, 4, 5, 6],
+    hours: t.hours || 24, start: t.start || "",
+  };
+  openSheet(sc.id ? "Zeitplan bearbeiten" : "Upload planen", "");
+  renderScheduleSheet();
+}
+function collectSchedule() {
+  const v = (id) => $("#" + id)?.value;
+  if (!$("#scName")) return;
+  sc.name = v("scName"); sc.bwlimit = v("scBw").trim(); sc.move = $("#scMove").checked;
+  if ($("#scAt")) sc.at = v("scAt");
+  if ($("#scTime")) sc.time = v("scTime");
+  if ($("#scHours")) { sc.hours = parseFloat(v("scHours")) || 24; sc.start = v("scStart"); }
+}
+function renderScheduleSheet() {
+  const types = [["once", "Einmalig"], ["weekly", "Wochentage"], ["interval", "Intervall"]];
+  const when = sc.type === "once"
+    ? `<label class="field">Zeitpunkt<input type="datetime-local" id="scAt" value="${esc(sc.at)}"></label>`
+    : sc.type === "weekly"
+      ? `<label class="field">Uhrzeit<input type="time" id="scTime" value="${esc(sc.time)}"></label>
+         <div class="chips">${WD.map((d, i) => `<button class="chip ${sc.days.includes(i) ? "active" : ""}" data-action="sc-day" data-i="${i}">${d}</button>`).join("")}</div>
+         <div class="chips"><button class="chip" data-action="sc-days" data-set="all">täglich</button><button class="chip" data-action="sc-days" data-set="work">werktags</button><button class="chip" data-action="sc-days" data-set="weekend">Wochenende</button></div>`
+      : `<label class="field">Alle … Stunden<input type="number" id="scHours" min="0.25" step="0.25" value="${esc(sc.hours)}"></label>
+         <label class="field">Erster Lauf (optional)<input type="datetime-local" id="scStart" value="${esc(sc.start)}"></label>`;
+  $("#sheetBody").innerHTML = `
+    <div class="card" style="padding:12px 14px"><div class="small muted">Quellen auf dem Server</div>
+      <div class="small">${sc.items.map((i) => `• ${esc(i)}`).join("<br>")}</div></div>
+    <div class="card dest" style="padding:12px 14px">${logo(destType({ remote: sc.remote }), 36)}
+      <div class="grow"><div class="label">Ziel</div><div class="val ellipsis">${esc(destLabel({ remote: sc.remote, path: sc.path }))}</div></div>
+      <button class="btn sm" data-action="sc-dest">Ändern</button></div>
+    <label class="field">Name<input type="text" id="scName" value="${esc(sc.name)}" placeholder="z.B. Nächtliches Foto-Backup"></label>
+    <div class="seg">${types.map(([k, l]) => `<button class="${sc.type === k ? "active" : ""}" data-action="sc-type" data-type="${k}">${l}</button>`).join("")}</div>
+    ${when}
+    <label class="field">Bandbreite begrenzen (optional)<input type="text" id="scBw" value="${esc(sc.bwlimit)}" placeholder="z.B. 10M = 10 MB/s, leer = unbegrenzt" autocapitalize="off"></label>
+    <label class="check"><input type="checkbox" id="scMove" ${sc.move ? "checked" : ""}> <span><b>Nach Upload auf dem Server löschen</b><br><span class="small muted">Standardmäßig aus – Dateien bleiben erhalten.</span></span></label>
+`;
+  setSheetFoot(`<button class="btn primary block" data-action="sc-save">${icon("check")} ${sc.id ? "Speichern" : "Zeitplan anlegen"}</button>`);
+}
+async function saveSchedule() {
+  collectSchedule();
+  if (sc.move && !confirm("Dieser Zeitplan löscht die Dateien nach erfolgreichem Upload vom Server. Wirklich so anlegen?")) return;
+  let tz = ""; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { /* alt */ }
+  const timing = sc.type === "once" ? { type: "once", at: sc.at, tz }
+    : sc.type === "weekly" ? { type: "weekly", time: sc.time, days: sc.days, tz }
+      : { type: "interval", hours: sc.hours, tz, ...(sc.start ? { start: sc.start } : {}) };
+  const body = { name: sc.name, items: sc.items, remote: sc.remote, path: sc.path, timing, move: sc.move, bwlimit: sc.bwlimit, enabled: true };
+  try {
+    const r = await api(sc.id ? `/schedules/${sc.id}` : "/schedules", { method: sc.id ? "PUT" : "POST", body });
+    closeSheet();
+    toast(`Geplant: ${r.description}`, "ok");
+    S.local.sel.clear(); S.move = false;
+    S.jobsTab = "schedules";
+    S.schedules = await api("/schedules");
+    go("jobs");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+// ================================================================== Explorer
+const EXT = {
+  image: /\.(jpe?g|png|gif|webp|heic|heif|bmp|svg|tiff?|raw|cr2|nef|dng)$/i,
+  video: /\.(mp4|mkv|mov|avi|webm|m4v|wmv|flv|ts)$/i,
+  music: /\.(mp3|flac|wav|m4a|aac|ogg|opus)$/i,
+  archive: /\.(zip|rar|7z|tar|gz|bz2|xz|iso)$/i,
+};
+const fileIcon = (name) => Object.keys(EXT).find((k) => EXT[k].test(name)) || "file";
+const parseTime = (s) => (s ? new Date(s.replace(/\.(\d{3})\d+/, ".$1")) : null);
+
+function exEntries() {
+  const X = S.ex; const q = X.filter.toLowerCase();
+  const list = X.entries.filter((e) => !q || e.name.toLowerCase().includes(q));
+  const cmp = {
+    name: (a, b) => a.name.localeCompare(b.name, "de", { numeric: true }),
+    size: (a, b) => (b.size || 0) - (a.size || 0),
+    date: (a, b) => (parseTime(b.mtime) || 0) - (parseTime(a.mtime) || 0),
+  }[X.sort] || (() => 0);
+  return list.sort((a, b) => (b.dir - a.dir) || cmp(a, b));
+}
+
+function viewExplorer() {
+  const X = S.ex;
+  if (X.remote === null) X.remote = S.remotes[0]?.name || "";
+  const remotes = [{ name: "", type: "local" }, ...S.remotes];
+  const chips = remotes.map((r) => `<button class="chip ${r.name === X.remote ? "active" : ""}" data-action="ex-remote" data-remote="${esc(r.name)}">${esc(r.name || "Server")}</button>`).join("");
+  const parts = X.path ? X.path.split("/") : [];
+  const crumbs = [`<button data-action="ex-cd" data-path="">${esc(X.remote || "Server")}:</button>`]
+    .concat(parts.map((p, i) => `<span>/</span><button data-action="ex-cd" data-path="${esc(parts.slice(0, i + 1).join("/"))}">${esc(p)}</button>`)).join("");
+  const entries = exEntries();
+  const rows = entries.map((e) => {
+    const p = joinPath(X.path, e.name);
+    const sel = X.sel.has(p);
+    const t = parseTime(e.mtime);
+    const meta = [e.dir ? "Ordner" : fmtBytes(e.size), t && !isNaN(t) ? t.toLocaleDateString("de-DE") : ""].filter(Boolean).join(" · ");
+    const ic = e.dir ? "folder" : fileIcon(e.name);
+    return `<li class="clickable ${sel ? "sel" : ""}" data-action="${e.dir ? "ex-cd" : "ex-item"}" data-path="${esc(p)}" data-dir="${e.dir ? 1 : 0}">
+      <input type="checkbox" class="cb" ${sel ? "checked" : ""} data-action="ex-toggle" data-path="${esc(p)}" data-dir="${e.dir ? 1 : 0}" aria-label="Auswählen">
+      <div class="ico ${e.dir ? "folder" : ""}">${icon(ic)}</div>
+      <div class="grow"><div class="ellipsis">${esc(e.name)}</div><div class="meta">${meta}</div></div>
+      <button class="icon-btn" style="width:34px;height:34px;background:none" data-action="ex-item" data-path="${esc(p)}" data-dir="${e.dir ? 1 : 0}" aria-label="Aktionen">${icon("more")}</button>
+    </li>`;
+  }).join("");
+  const n = X.sel.size;
+  const total = entries.reduce((a, e) => a + (e.dir ? 0 : Math.max(0, e.size || 0)), 0);
+  return `<div class="chips">${chips}</div>
+    <div class="card flush">
+      <div class="crumbs">${crumbs}</div>
+      <div class="row" style="padding:10px 16px;border-bottom:1px solid var(--line)">
+        <input type="search" placeholder="In diesem Ordner suchen…" value="${esc(X.filter)}" data-input="ex-filter">
+        <select data-input="ex-sort" style="width:auto" aria-label="Sortierung">
+          ${[["name", "Name"], ["date", "Datum"], ["size", "Größe"]].map(([k, l]) => `<option value="${k}" ${X.sort === k ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+        <button class="icon-btn" data-action="ex-mkdir" aria-label="Neuer Ordner">${icon("folderPlus")}</button>
+      </div>
+      ${X.error ? `<div class="empty error">${esc(X.error)}</div>` : X.loading && !X.entries.length ? `<div class="empty">Lade…</div>` : rows ? `<ul class="list">${rows}</ul>` : `<div class="empty">${icon("folder")}<br>Ordner ist leer</div>`}
+      ${entries.length ? `<div class="small muted" style="padding:10px 16px;border-top:1px solid var(--line)">${entries.length} Einträge · ${fmtBytes(total)} in Dateien</div>` : ""}
+    </div>
+    ${n ? `<div class="actionbar">
+      <div class="grow small"><b>${n}</b> ausgewählt<br><button class="btn ghost sm" style="padding-left:0" data-action="ex-clear">zurücksetzen</button></div>
+      <button class="btn sm" data-action="ex-transfer" data-move="0">${icon("copy")}<span class="lbl">Kopieren</span></button>
+      <button class="btn sm" data-action="ex-transfer" data-move="1">${icon("arrow")}<span class="lbl">Verschieben</span></button>
+      <button class="icon-btn" style="color:var(--err)" data-action="ex-delete-sel" aria-label="Löschen">${icon("trash")}</button>
+    </div>` : ""}`;
+}
+
+async function loadExplorer() {
+  const X = S.ex;
+  if (X.remote === null) X.remote = S.remotes[0]?.name || "";
+  if (X.remote && !S.remotes.some((r) => r.name === X.remote)) X.remote = "";
+  X.loading = true; X.error = "";
+  if (S.view === "explorer") render();
+  try {
+    const r = await api(`/explore?remote=${encodeURIComponent(X.remote)}&path=${encodeURIComponent(X.path)}`);
+    X.entries = r.entries;
+  } catch (e) { X.entries = []; X.error = e.message; }
+  X.loading = false;
+  store.set("ex.remote", X.remote);
+  if (S.view === "explorer") render();
+}
+
+const exUrl = (p, inline) => `/api/explore/download?remote=${encodeURIComponent(S.ex.remote)}&path=${encodeURIComponent(p)}${inline ? "&inline=true" : ""}`;
+
+function openExItem(p, isDir) {
+  const e = S.ex.entries.find((x) => joinPath(S.ex.path, x.name) === p) || { name: p.split("/").pop(), dir: isDir };
+  const t = parseTime(e.mtime);
+  const btn = (action, ic, label, extra = "") => `<button class="btn block" style="justify-content:flex-start" data-action="${action}" data-path="${esc(p)}" data-dir="${isDir ? 1 : 0}" ${extra}>${icon(ic)} ${label}</button>`;
+  openSheet(e.name, `
+    <div class="row">${isDir ? `<div class="ico folder" style="width:44px;height:44px;border-radius:12px;display:grid;place-items:center">${icon("folder")}</div>` : `<div class="ico" style="width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--card-2)">${icon(fileIcon(e.name))}</div>`}
+      <div class="grow small muted">${esc(destLabel({ remote: S.ex.remote, path: p }))}<br>${isDir ? "Ordner" : fmtBytes(e.size)}${t && !isNaN(t) ? " · " + t.toLocaleString("de-DE") : ""}</div></div>
+    <div class="stack" style="gap:8px">
+      ${isDir ? btn("ex-open-dir", "folder", "Öffnen") : btn("ex-view", "eye", "Ansehen / Öffnen") + btn("ex-download", "download", "Herunterladen")}
+      ${S.ex.remote ? btn("ex-link", "share", "Freigabelink erstellen") : ""}
+      ${btn("ex-rename", "pencil", "Umbenennen")}
+      ${btn("ex-copy-one", "copy", "Kopieren nach …")}
+      ${btn("ex-move-one", "arrow", "Verschieben nach …")}
+      ${btn("ex-delete-one", "trash", "Löschen", 'style="justify-content:flex-start;color:var(--err)"')}
+    </div>`);
+}
+
+function exTransfer(items, move) {
+  openPicker("explorer", {
+    title: move ? "Verschieben nach" : "Kopieren nach",
+    button: move ? "Hierher verschieben" : "Hierher kopieren",
+    initial: { remote: S.ex.remote, path: S.ex.path },
+    onChoose: async (d) => {
+      try {
+        const r = await api("/explore/transfer", { body: { remote: S.ex.remote, items, dest_remote: d.remote, dest_path: d.path, move } });
+        closeSheet();
+        toast(`${r.jobs.length} Auftrag/Aufträge gestartet – siehe „Aufträge“`, "ok");
+        S.ex.sel.clear();
+        pollJobs(true);
+        render();
+      } catch (e) { toast(e.message, "err"); }
+    },
+  });
+}
+
+async function exDelete(items) {
+  const where = S.ex.remote || "dem Server";
+  const list = items.slice(0, 8).map((i) => `• ${i.path}${i.dir ? "/ (mit Inhalt)" : ""}`).join("\n") + (items.length > 8 ? `\n… und ${items.length - 8} weitere` : "");
+  if (!confirm(`${items.length} Element(e) endgültig auf ${where} löschen?\n\n${list}`)) return;
+  try {
+    await api("/explore/delete", { body: { remote: S.ex.remote, items } });
+    toast("Gelöscht", "ok");
+    closeSheet();
+    S.ex.sel.clear();
+    loadExplorer();
+  } catch (e) { toast(e.message, "err"); loadExplorer(); }
+}
+
+const exItemOf = (el) => [{ path: el.dataset.path, dir: el.dataset.dir === "1" }];
+
+Object.assign(actions, {
+  "jobs-tab": async (el) => { S.jobsTab = el.dataset.tab; render(); if (S.jobsTab === "schedules") { S.schedules = await api("/schedules"); render(); } },
+  "upload-plan": () => {
+    const d = S.dest.upload;
+    const items = [...S.local.sel];
+    openScheduleSheet({ items, remote: d.remote, path: d.path, move: S.move, name: items.length === 1 ? items[0].split("/").pop() : `${items.length} Elemente → ${d.remote || "Server"}` });
+  },
+  "sc-type": (el) => { collectSchedule(); sc.type = el.dataset.type; renderScheduleSheet(); },
+  "sc-day": (el) => { collectSchedule(); const i = +el.dataset.i; sc.days = sc.days.includes(i) ? sc.days.filter((x) => x !== i) : [...sc.days, i].sort(); renderScheduleSheet(); },
+  "sc-days": (el) => { collectSchedule(); sc.days = { all: [0, 1, 2, 3, 4, 5, 6], work: [0, 1, 2, 3, 4], weekend: [5, 6] }[el.dataset.set]; renderScheduleSheet(); },
+  "sc-dest": () => {
+    collectSchedule();
+    const draft = sc;
+    openPicker("schedule", { title: "Ziel für Zeitplan", button: "Als Ziel verwenden", initial: { remote: draft.remote, path: draft.path },
+      onChoose: (d) => { sc = draft; sc.remote = d.remote; sc.path = d.path; openSheet(sc.id ? "Zeitplan bearbeiten" : "Upload planen", ""); renderScheduleSheet(); } });
+  },
+  "sc-save": () => saveSchedule(),
+  "sc-toggle": async (el) => {
+    const cur = S.schedules.find((x) => x.id === el.dataset.id);
+    try { await api(`/schedules/${el.dataset.id}/enabled`, { body: { enabled: !cur.enabled } }); } catch (e) { toast(e.message, "err"); }
+    S.schedules = await api("/schedules"); render();
+  },
+  "sc-run": async (el) => {
+    try { const r = await api(`/schedules/${el.dataset.id}/run`, { method: "POST" }); toast(r.last_status, "ok"); pollJobs(); } catch (e) { toast(e.message, "err"); }
+    S.schedules = await api("/schedules"); render();
+  },
+  "sc-edit": (el) => openScheduleSheet(S.schedules.find((x) => x.id === el.dataset.id)),
+  "sc-delete": async (el) => {
+    const cur = S.schedules.find((x) => x.id === el.dataset.id);
+    if (!confirm(`Zeitplan „${cur.name}“ löschen? (Dateien bleiben unverändert)`)) return;
+    await api(`/schedules/${el.dataset.id}`, { method: "DELETE" }).catch((e) => toast(e.message, "err"));
+    S.schedules = await api("/schedules"); render();
+  },
+  "ex-remote": (el) => { Object.assign(S.ex, { remote: el.dataset.remote, path: "", filter: "", entries: [] }); S.ex.sel.clear(); loadExplorer(); },
+  "ex-cd": (el) => { S.ex.path = el.dataset.path; S.ex.filter = ""; S.ex.sel.clear(); loadExplorer(); window.scrollTo({ top: 0 }); },
+  "ex-open-dir": (el) => { closeSheet(); actions["ex-cd"](el); },
+  "ex-refresh": () => loadExplorer(),
+  "ex-toggle": (el) => { const p = el.dataset.path; S.ex.sel.has(p) ? S.ex.sel.delete(p) : S.ex.sel.set(p, el.dataset.dir === "1"); render(); },
+  "ex-clear": () => { S.ex.sel.clear(); render(); },
+  "ex-item": (el) => openExItem(el.dataset.path, el.dataset.dir === "1"),
+  "ex-view": (el) => { window.open(exUrl(el.dataset.path, true), "_blank"); },
+  "ex-download": (el) => { const a = document.createElement("a"); a.href = exUrl(el.dataset.path, false); a.download = ""; document.body.append(a); a.click(); a.remove(); },
+  "ex-link": async (el) => {
+    try {
+      const r = await api("/explore/link", { body: { remote: S.ex.remote, path: el.dataset.path } });
+      if (navigator.share) { try { await navigator.share({ url: r.url }); return; } catch { /* abgebrochen */ } }
+      await navigator.clipboard.writeText(r.url).then(() => toast("Link kopiert", "ok"), () => toast(r.url));
+    } catch (e) { toast(e.message, "err"); }
+  },
+  "ex-rename": async (el) => {
+    const old = el.dataset.path.split("/").pop();
+    const name = prompt("Neuer Name:", old);
+    if (!name || name === old) return;
+    try { await api("/explore/rename", { body: { remote: S.ex.remote, path: el.dataset.path, new_name: name } }); closeSheet(); toast("Umbenannt", "ok"); loadExplorer(); } catch (e) { toast(e.message, "err"); }
+  },
+  "ex-copy-one": (el) => exTransfer(exItemOf(el), false),
+  "ex-move-one": (el) => exTransfer(exItemOf(el), true),
+  "ex-delete-one": (el) => exDelete(exItemOf(el)),
+  "ex-transfer": (el) => exTransfer([...S.ex.sel].map(([path, dir]) => ({ path, dir })), el.dataset.move === "1"),
+  "ex-delete-sel": () => exDelete([...S.ex.sel].map(([path, dir]) => ({ path, dir }))),
+  "ex-mkdir": async () => {
+    const name = prompt("Name des neuen Ordners:");
+    if (!name) return;
+    try { await api("/mkdir", { body: { remote: S.ex.remote, path: joinPath(S.ex.path, name.replace(/\//g, "-")) } }); loadExplorer(); } catch (e) { toast(e.message, "err"); }
+  },
 });
 
 // ------------------------------------------------------------------ Start

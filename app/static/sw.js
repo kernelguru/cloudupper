@@ -1,5 +1,5 @@
 /* Service Worker: App-Shell offline verfügbar, API immer live. */
-const CACHE = "cloudupper-v2";
+const CACHE = "cloudupper-v3";
 const SHELL = ["/", "/app.css", "/app.js", "/manifest.webmanifest", "/icons/icon.svg", "/icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

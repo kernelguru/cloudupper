@@ -11,12 +11,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import auth, config, providers, rclone, torbox
-from .jobs import Job, manager
+from .jobs import Job, make_copy_jobs, manager
+from .schedules import scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("cloudupper")
@@ -28,6 +29,7 @@ UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 async def lifespan(_: FastAPI):
     config.ensure_dirs()
     manager.load()
+    scheduler.load()
     if not config.APP_PASSWORD:
         log.warning("APP_PASSWORD ist nicht gesetzt – die Oberfläche ist ungeschützt!")
     yield
@@ -63,8 +65,7 @@ async def torbox_error(_: Request, exc: torbox.TorboxError):
     return JSONResponse({"detail": f"TorBox: {exc}"}, status_code=502)
 
 
-def fmt_dest(remote: str, path: str) -> str:
-    return f"{remote or 'Server'}:/{rclone.clean_rel(path)}"
+fmt_dest = rclone.label
 
 
 # ====================================================================== Session
@@ -345,21 +346,10 @@ class ServerUpload(BaseModel):
 
 @app.post("/api/upload/server")
 async def upload_server(body: ServerUpload):
-    dest_dir = rclone.clean_rel(body.path)
-    created = []
-    for item in body.items:
-        src = rclone.local_path(item)
-        if not src.exists() or src == config.DATA_DIR.resolve():
-            raise HTTPException(400, f"Nicht gefunden: {item}")
-        dst = rclone.target(body.remote, f"{dest_dir}/{src.name}")
-        job = Job(
-            title=src.name,
-            source_label=f"Server:/{rclone.clean_rel(item)}",
-            dest_label=fmt_dest(body.remote, f"{dest_dir}/{src.name}"),
-            spec={"op": "copy", "src": str(src), "dst": dst, "is_dir": src.is_dir(), "move": body.move},
-        )
-        created.append(manager.submit(job).public())
-    return {"jobs": created}
+    if any(not rclone.clean_rel(i) for i in body.items):
+        raise HTTPException(400, "Das Datenverzeichnis selbst kann nicht hochgeladen werden")
+    jobs = make_copy_jobs("", [(i, None) for i in body.items], body.remote, body.path, move=body.move)
+    return {"jobs": [j.public() for j in jobs]}
 
 
 @app.put("/api/upload/device/{upload_id}")
@@ -509,6 +499,156 @@ async def job_delete(job_id: str):
 @app.post("/api/jobs/clear")
 async def jobs_clear():
     manager.clear_finished()
+    return {"ok": True}
+
+
+# ====================================================================== Explorer
+@app.get("/api/explore")
+async def explore(remote: str = "", path: str = ""):
+    path = rclone.clean_rel(path)
+    entries = await rclone.lsjson(remote, path, dirs_only=False, modtime=True)
+    if not remote:
+        entries = [e for e in entries if not e["name"].startswith(".")]
+    return {"remote": remote, "path": path, "entries": entries}
+
+
+class ExploreItem(BaseModel):
+    path: str
+    dir: bool = False
+
+
+class ExploreDelete(BaseModel):
+    remote: str = ""
+    items: list[ExploreItem]
+
+
+@app.post("/api/explore/delete")
+async def explore_delete(body: ExploreDelete):
+    """Löscht in der Cloud oder auf dem Server – nur auf ausdrücklichen Wunsch."""
+    errors = []
+    for it in body.items:
+        try:
+            await rclone.delete(body.remote, it.path, it.dir)
+            log.info("Gelöscht auf Wunsch: %s", rclone.label(body.remote, it.path))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{it.path}: {e}")
+    if errors:
+        raise HTTPException(502, "; ".join(errors)[:500])
+    return {"deleted": len(body.items)}
+
+
+class ExploreRename(BaseModel):
+    remote: str = ""
+    path: str
+    new_name: str
+
+
+@app.post("/api/explore/rename")
+async def explore_rename(body: ExploreRename):
+    return {"path": await rclone.rename(body.remote, body.path, body.new_name.strip())}
+
+
+class ExploreTransfer(BaseModel):
+    remote: str = ""
+    items: list[ExploreItem]
+    dest_remote: str = ""
+    dest_path: str = ""
+    move: bool = False
+
+
+@app.post("/api/explore/transfer")
+async def explore_transfer(body: ExploreTransfer):
+    jobs = make_copy_jobs(body.remote, [(i.path, i.dir) for i in body.items],
+                          body.dest_remote, body.dest_path, move=body.move)
+    return {"jobs": [j.public() for j in jobs]}
+
+
+class ExploreLink(BaseModel):
+    remote: str
+    path: str
+
+
+@app.post("/api/explore/link")
+async def explore_link(body: ExploreLink):
+    if not body.remote:
+        raise HTTPException(400, "Für Server-Dateien gibt es keine Freigabelinks")
+    return {"url": await rclone.link(body.remote, body.path)}
+
+
+@app.get("/api/explore/download")
+async def explore_download(remote: str = "", path: str = "", inline: bool = False):
+    import mimetypes
+    from urllib.parse import quote
+
+    info = await rclone.stat(remote, path)
+    if info["dir"]:
+        raise HTTPException(400, "Ordner können nicht direkt heruntergeladen werden")
+    name = info["name"]
+    ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    if not remote:  # Server-Dateien direkt ausliefern (inkl. Range für Videos)
+        return FileResponse(rclone.local_path(path), media_type=ctype, filename=name,
+                            content_disposition_type="inline" if inline else "attachment")
+    proc = await asyncio.create_subprocess_exec(
+        *rclone.base_cmd(), "cat", rclone.target(remote, path),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+
+    async def stream():
+        try:
+            assert proc.stdout
+            while chunk := await proc.stdout.read(256 * 1024):
+                yield chunk
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+
+    headers = {"Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(name)}"}
+    if info["size"] >= 0:
+        headers["Content-Length"] = str(info["size"])
+    return StreamingResponse(stream(), media_type=ctype, headers=headers)
+
+
+# ====================================================================== Zeitpläne
+@app.get("/api/schedules")
+async def schedules_list():
+    return scheduler.list()
+
+
+@app.post("/api/schedules")
+async def schedules_create(body: dict):
+    return scheduler.upsert(body).public()
+
+
+def _sched(sid: str):
+    if sid not in scheduler.items:
+        raise HTTPException(404, "Zeitplan nicht gefunden")
+
+
+@app.put("/api/schedules/{sid}")
+async def schedules_update(sid: str, body: dict):
+    _sched(sid)
+    return scheduler.upsert(body, sid).public()
+
+
+class EnabledBody(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/schedules/{sid}/enabled")
+async def schedules_enabled(sid: str, body: EnabledBody):
+    _sched(sid)
+    return scheduler.set_enabled(sid, body.enabled).public()
+
+
+@app.post("/api/schedules/{sid}/run")
+async def schedules_run(sid: str):
+    _sched(sid)
+    return scheduler.run_now(sid).public()
+
+
+@app.delete("/api/schedules/{sid}")
+async def schedules_delete(sid: str):
+    _sched(sid)
+    scheduler.delete(sid)
     return {"ok": True}
 
 

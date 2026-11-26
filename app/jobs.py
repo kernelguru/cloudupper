@@ -32,6 +32,7 @@ class Job:
     eta: float | None = None
     current: str = ""
     error: str = ""
+    origin: str = ""  # z.B. "schedule:<id>"
     created: float = field(default_factory=time.time)
     started: float | None = None
     finished: float | None = None
@@ -159,13 +160,13 @@ class JobManager:
             else:
                 verb = "moveto" if spec.get("move") else "copyto"
                 extra = []
-            await self._rclone(job, [verb, spec["src"], spec["dst"], *extra])
+            await self._rclone(job, [verb, spec["src"], spec["dst"], *extra, *spec.get("flags", [])])
             _cleanup(job)
         elif spec["op"] == "torbox":
             job.current = "Link wird bei TorBox angefordert…"
             url = await torbox.request_link(spec["kind"], spec["item_id"], spec.get("file_id"))
             job.current = ""
-            await self._rclone(job, ["copyurl", url, spec["dst"]])
+            await self._rclone(job, ["copyurl", url, spec["dst"], *spec.get("flags", [])])
         else:
             raise RuntimeError(f"Unbekannte Operation {spec['op']}")
 
@@ -203,6 +204,41 @@ class JobManager:
             raise asyncio.CancelledError
         if rc != 0:
             raise RuntimeError(last_error or f"rclone beendet mit Code {rc}")
+
+
+def make_copy_jobs(src_remote: str, items: list[tuple[str, bool | None]], dest_remote: str,
+                   dest_path: str, move: bool = False, origin: str = "",
+                   flags: list[str] | None = None) -> list[Job]:
+    """Erzeugt (und startet) Kopier-/Verschiebe-Aufträge für Dateien und Ordner.
+
+    items: (relativer Pfad in src_remote, ist_ordner) – bei lokaler Quelle wird is_dir ermittelt.
+    """
+    dest_dir = rclone.clean_rel(dest_path)
+    jobs = []
+    for rel, is_dir in items:
+        rel = rclone.clean_rel(rel)
+        if not rel:
+            raise ValueError("Das Wurzelverzeichnis kann nicht direkt übertragen werden")
+        if not src_remote:
+            p = rclone.local_path(rel)
+            if not p.exists():
+                raise ValueError(f"Nicht gefunden: {rel}")
+            is_dir = p.is_dir()
+        name = rel.rsplit("/", 1)[-1]
+        dst_rel = f"{dest_dir}/{name}" if dest_dir else name
+        if src_remote == dest_remote and rclone.clean_rel(dst_rel) == rel:
+            raise ValueError(f"Quelle und Ziel sind identisch: {rel}")
+        job = Job(
+            title=name,
+            source_label=rclone.label(src_remote, rel),
+            dest_label=rclone.label(dest_remote, dst_rel),
+            origin=origin,
+            spec={"op": "copy", "src": rclone.target(src_remote, rel),
+                  "dst": rclone.target(dest_remote, dst_rel), "is_dir": bool(is_dir),
+                  "move": move, "flags": flags or []},
+        )
+        jobs.append(manager.submit(job))
+    return jobs
 
 
 def _cleanup(job: Job) -> None:
