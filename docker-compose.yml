@@ -7,6 +7,9 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    # Nur für das optionale VPN (VPN_ENABLED=true) nötig:
+    cap_add:
+      - NET_ADMIN
     env_file: .env
     environment:
       # Benutzer/Gruppe für neue Dateien (`id` auf dem Host; Unraid: 99/100)

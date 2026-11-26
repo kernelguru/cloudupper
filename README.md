@@ -68,6 +68,19 @@ Der Tab **Explorer** zeigt Server und alle verbundenen Clouds:
 - **Kopieren oder Verschieben** – auch **von Cloud zu Cloud** (z. B. OneDrive → HiDrive) oder aus der Cloud auf den Server; läuft als Auftrag im Hintergrund
 - **Freigabelink** erstellen (Google Drive, OneDrive, Dropbox, HiDrive …) und direkt über das iOS-Teilen-Menü versenden
 
+## VPN (WireGuard, z. B. Proton VPN)
+
+Bei schlechtem Routing des Providers (z. B. Vodafone → Google) kann der gesamte Verkehr des Containers – Cloud-Uploads, TorBox, Explorer – durch einen WireGuard-Tunnel laufen. Die Weboberfläche bleibt im lokalen Netz normal erreichbar.
+
+1. Bei Proton VPN unter **[Downloads → WireGuard-Konfiguration](https://account.protonvpn.com/downloads)** eine Konfiguration erstellen: Plattform „Router“ oder „Linux“, einen **nahen Server** (z. B. DE/NL/CH) wählen. NetShield aus, „Moderate NAT“ und Port-Forwarding werden nicht benötigt.
+2. Die Datei als `wg0.conf` nach `/mnt/user/appdata/cloudupper/wireguard/` legen (Compose: `./config/wireguard/wg0.conf`).
+3. Im Template **VPN aktivieren = true** setzen. `--cap-add=NET_ADMIN` steht bereits in den Extra Parameters. Container neu starten.
+4. Unter **Clouds** zeigt die VPN-Karte Status, letzten Handshake und Datenmenge; „Öffentliche IP prüfen“ zeigt, mit welcher IP der Container ins Internet geht.
+
+**Kill-Switch** (Standard: an): Fällt der Tunnel aus, wird nichts am VPN vorbei übertragen – Aufträge schlagen dann fehl, statt über die normale Leitung zu laufen. Startet das VPN gar nicht (z. B. falsche Konfiguration), beendet sich der Container mit einer Meldung im Log.
+
+Hinweise: Unraid bringt das WireGuard-Kernel-Modul mit. IPv6 wird bei aktivem VPN gesperrt. `LAN_NETWORK` legt fest, welche Netze direkt erreichbar bleiben (Standard: alle privaten Netze). Ob das VPN schneller ist, hängt vom Server ab – am besten mit einem großen Upload vergleichen.
+
 ## Dateien auf dem Server werden nie automatisch gelöscht
 
 - Standard ist **kopieren** – die Originale bleiben auf dem Server.

@@ -26,6 +26,7 @@ const ICONS = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>',
+  shield: '<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -188,7 +189,7 @@ function viewUpload() {
       <button class="${S.uploadMode === "device" ? "active" : ""}" data-action="upload-mode" data-mode="device">${icon("phone")} Vom Gerät</button>
     </div>`;
   const noRemotes = !S.remotes.length ? `<div class="banner">Noch keine Cloud verbunden. <a href="#clouds" data-action="nav" data-view="clouds">Jetzt verbinden →</a></div>` : "";
-  return seg + noRemotes + destCard("upload", "Hochladen nach") + (S.uploadMode === "server" ? viewLocal() : viewDevice());
+  return seg + vpnBanner() + noRemotes + destCard("upload", "Hochladen nach") + (S.uploadMode === "server" ? viewLocal() : viewDevice());
 }
 
 function viewLocal() {
@@ -458,7 +459,7 @@ function viewTorbox() {
       }).join("")}</ul></li>` : ""}`;
   }).join("");
   const n = T.sel.size;
-  return seg + add + destCard("torbox", "Speichern unter") + `
+  return seg + vpnBanner() + add + destCard("torbox", "Speichern unter") + `
     <div class="card flush">
       <div style="padding:10px 16px;border-bottom:1px solid var(--line)"><input type="search" placeholder="Suchen…" value="${esc(T.filter)}" data-input="tb-filter"></div>
       ${T.error ? `<div class="empty error">${esc(T.error)}</div>` : T.loading && !T.items.length ? `<div class="empty">Lade…</div>` : rows ? `<ul class="list">${rows}</ul>` : `<div class="empty">Keine Einträge</div>`}
@@ -550,6 +551,7 @@ async function pollJobs(force = false) {
     }
     lastActive = active;
     if (S.view === "jobs" && S.jobsTab === "schedules") S.schedules = await api("/schedules");
+    refreshVpn();
     if (S.view === "jobs") render();
     jobTimer = setTimeout(pollJobs, active ? 1500 : 8000);
   } catch {
@@ -575,11 +577,13 @@ function viewClouds() {
   return `${S.status.auth === false ? `<div class="banner">⚠️ Kein <code>APP_PASSWORD</code> gesetzt – jeder im Netzwerk kann die App bedienen.</div>` : ""}
     <button class="btn primary block" data-action="connect">${icon("plus")} Cloud verbinden</button>
     ${cards || `<div class="card empty">${icon("cloud")}<br>Noch keine Cloud verbunden.</div>`}
+    ${vpnCard()}
     <div class="card stack" id="settings"><h3>${icon("gear")} Einstellungen</h3><div class="muted small">Lade…</div></div>
     <p class="small muted" style="text-align:center">CloudUpper ${esc(S.status.version || "")} · rclone ${esc(S.status.rclone || "")}</p>`;
 }
 
 async function loadAbout() {
+  refreshVpn(true);
   renderSettings();
   for (const r of S.remotes) {
     if (S.about[r.name]) continue;
@@ -898,6 +902,45 @@ window.addEventListener("hashchange", () => {
   if (TITLES[v] && v !== S.view) go(v);
 });
 
+// ================================================================== VPN
+let vpnCheckedAt = 0;
+let vpnIp = null;
+async function refreshVpn(force = false) {
+  if (!S.status.vpn?.enabled) return;
+  if (!force && Date.now() - vpnCheckedAt < 20000) return;
+  vpnCheckedAt = Date.now();
+  try {
+    const was = S.status.vpn.connected;
+    S.status.vpn = await api("/vpn");
+    if (was !== S.status.vpn.connected && ["upload", "torbox", "clouds"].includes(S.view)) render();
+  } catch { /* egal */ }
+}
+function vpnBanner() {
+  const v = S.status.vpn;
+  if (!v?.enabled || v.connected) return "";
+  return `<div class="banner">${icon("shield")} <b>VPN nicht verbunden.</b> Der Kill-Switch blockiert Übertragungen ins Internet, bis der Tunnel steht. <a href="#clouds" data-action="nav" data-view="clouds">Details</a></div>`;
+}
+function vpnCard() {
+  const v = S.status.vpn;
+  if (!v?.enabled) {
+    return `<details class="card"><summary>${icon("shield")} VPN (WireGuard, z.B. Proton VPN)</summary><div class="small muted stack">
+      <p style="margin:0">Leitet den gesamten Verkehr des Containers (Uploads, TorBox, Clouds) durch einen WireGuard-Tunnel – hilfreich bei schlechtem Routing des Providers. Mit Kill-Switch: Fällt der Tunnel aus, wird nichts am VPN vorbei übertragen.</p>
+      <ol style="margin:0;padding-left:18px"><li>Bei Proton VPN: <a href="https://account.protonvpn.com/downloads" target="_blank" rel="noopener">Downloads → WireGuard-Konfiguration</a> erstellen (Plattform „Router“, nahen Server wählen).</li>
+      <li>Datei als <code>wg0.conf</code> nach <code>/config/wireguard/</code> (Unraid: <code>appdata/cloudupper/wireguard/</code>) legen.</li>
+      <li>Im Container <code>VPN_ENABLED=true</code> setzen, <code>--cap-add=NET_ADMIN</code> ergänzen und neu starten.</li></ol></div></details>`;
+  }
+  const ok = v.connected;
+  const age = v.handshake_age != null ? (v.handshake_age < 120 ? `vor ${v.handshake_age} s` : `vor ${Math.round(v.handshake_age / 60)} min`) : "noch keiner";
+  return `<div class="card stack" style="gap:8px">
+    <div class="row"><div class="logo" style="width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;background:${ok ? "var(--ok)" : "var(--err)"}">${icon("shield")}</div>
+      <div class="grow"><div class="val"><b>VPN ${ok ? "verbunden" : "nicht verbunden"}</b></div><div class="small muted">${esc(v.endpoint || v.detail || "")}</div></div>
+      <span class="chip ${v.killswitch ? "ok" : "warn"}">Kill-Switch ${v.killswitch ? "an" : "aus"}</span></div>
+    <div class="small muted">Letzter Handshake: ${age} · ↓ ${fmtBytes(v.rx)} · ↑ ${fmtBytes(v.tx)}</div>
+    ${vpnIp ? `<div class="small">Öffentliche IP: <b>${esc(vpnIp.ip)}</b> (${esc(vpnIp.country || "?")}, ${esc(vpnIp.colo || "")})</div>` : ""}
+    <button class="btn sm" data-action="vpn-check">${icon("search")} Öffentliche IP prüfen</button>
+  </div>`;
+}
+
 // ================================================================== Zeitpläne
 const WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const pad = (n) => String(n).padStart(2, "0");
@@ -1142,6 +1185,10 @@ async function exDelete(items) {
 const exItemOf = (el) => [{ path: el.dataset.path, dir: el.dataset.dir === "1" }];
 
 Object.assign(actions, {
+  "vpn-check": async () => {
+    try { vpnIp = await api("/vpn/check"); } catch (e) { vpnIp = null; toast(e.message, "err"); }
+    await refreshVpn(true); render();
+  },
   "jobs-tab": async (el) => { S.jobsTab = el.dataset.tab; render(); if (S.jobsTab === "schedules") { S.schedules = await api("/schedules"); render(); } },
   "upload-plan": () => {
     const d = S.dest.upload;

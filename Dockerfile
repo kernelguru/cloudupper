@@ -18,6 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini \
+      wireguard-tools iproute2 iptables \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
@@ -27,7 +28,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY vpn.sh /usr/local/bin/cloudupper-vpn
+RUN chmod +x /entrypoint.sh /usr/local/bin/cloudupper-vpn
 
 VOLUME ["/config", "/data"]
 EXPOSE 8080

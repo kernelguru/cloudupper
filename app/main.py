@@ -105,6 +105,43 @@ async def logout(response: Response):
     return {"ok": True}
 
 
+VPN_STATUS = Path(os.getenv("VPN_STATE_DIR", "/run/cloudupper-vpn")) / "status.json"
+
+
+def vpn_state() -> dict:
+    enabled = os.getenv("VPN_ENABLED", "false").lower() == "true"
+    if not enabled:
+        return {"enabled": False}
+    try:
+        st = json.loads(VPN_STATUS.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"enabled": True, "connected": False, "detail": "Kein Status (VPN startet noch?)"}
+    import time as _t
+    hs = int(st.get("latest_handshake") or 0)
+    # WireGuard erneuert den Handshake alle ~2 Minuten, solange Daten fließen
+    st["connected"] = bool(st.get("interface_up")) and hs > 0 and _t.time() - hs < 300
+    st["handshake_age"] = int(_t.time() - hs) if hs else None
+    return st
+
+
+@app.get("/api/vpn")
+async def vpn_status():
+    return vpn_state()
+
+
+@app.get("/api/vpn/check")
+async def vpn_check():
+    """Prüft die öffentliche IP – läuft bei aktivem VPN durch den Tunnel."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get("https://www.cloudflare.com/cdn-cgi/trace")
+        info = dict(line.split("=", 1) for line in r.text.splitlines() if "=" in line)
+        return {"ip": info.get("ip"), "country": info.get("loc"), "colo": info.get("colo")}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Keine Internetverbindung: {e}")
+
+
 @app.get("/api/status")
 async def status():
     return {
@@ -115,6 +152,7 @@ async def status():
         "download_dir": config.DOWNLOAD_SUBDIR,
         "auth": auth.auth_required(),
         "notify": bool(config.NOTIFY_URL),
+        "vpn": vpn_state(),
     }
 
 

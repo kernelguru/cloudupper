@@ -11,12 +11,12 @@
   <Project>https://github.com/kernelguru/cloudupper</Project>
   <Overview>Lädt Dateien vom Unraid-Server oder direkt vom iPhone in Google Drive, OneDrive, STRATO HiDrive, Dropbox, WebDAV/Nextcloud, SFTP, S3 und alle weiteren rclone-Dienste hoch – mit Zielordner-Auswahl. Lädt ausgewählte Dateien von TorBox auf den Server oder direkt in die Cloud. Schöne Weboberfläche, als App auf dem iPhone installierbar (Safari → Teilen → Zum Home-Bildschirm).&#xD;
 &#xD;
-Zeitgesteuerte Uploads (z.B. nachts mit Bandbreitenlimit) und ein Cloud-Explorer mit Cloud-zu-Cloud-Kopieren sind integriert. Dateien auf dem Server werden nur gelöscht, wenn du das ausdrücklich auswählst.</Overview>
+Optional läuft der gesamte Verkehr über WireGuard (z.B. Proton VPN) mit Kill-Switch. Zeitgesteuerte Uploads (z.B. nachts mit Bandbreitenlimit) und ein Cloud-Explorer mit Cloud-zu-Cloud-Kopieren sind integriert. Dateien auf dem Server werden nur gelöscht, wenn du das ausdrücklich auswählst.</Overview>
   <Category>Cloud: Downloaders: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/kernelguru/cloudupper/main/unraid/cloudupper.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/kernelguru/cloudupper/main/app/static/icons/icon-512.png</Icon>
-  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <ExtraParams>--restart=unless-stopped --cap-add=NET_ADMIN</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DonateText/>
@@ -39,6 +39,9 @@ Zeitgesteuerte Uploads (z.B. nachts mit Bandbreitenlimit) und ein Cloud-Explorer
   <Config Name="HiDrive Client-Secret" Target="HIDRIVE_CLIENT_SECRET" Default="" Mode="" Description="Optional" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Dropbox Client-ID" Target="DROPBOX_CLIENT_ID" Default="" Mode="" Description="Optional: eigene OAuth-App für Dropbox" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Dropbox Client-Secret" Target="DROPBOX_CLIENT_SECRET" Default="" Mode="" Description="Optional" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="VPN aktivieren" Target="VPN_ENABLED" Default="false|true" Mode="" Description="Gesamten Verkehr über WireGuard (z.B. Proton VPN) leiten. Konfiguration als wg0.conf in appdata/cloudupper/wireguard/ ablegen. Benötigt --cap-add=NET_ADMIN (in Extra Parameters bereits gesetzt)." Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="VPN Kill-Switch" Target="VPN_KILLSWITCH" Default="true|false" Mode="" Description="Blockiert jeden Verkehr am VPN vorbei, wenn der Tunnel ausfällt" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Lokales Netz" Target="LAN_NETWORK" Default="192.168.0.0/16,172.16.0.0/12,10.0.0.0/8" Mode="" Description="Netze, die am VPN vorbei erreichbar bleiben (für die Weboberfläche), z.B. 192.168.178.0/24" Type="Variable" Display="advanced" Required="false" Mask="false">192.168.0.0/16,172.16.0.0/12,10.0.0.0/8</Config>
   <Config Name="Zeitzone" Target="TZ" Default="Europe/Berlin" Mode="" Description="Zeitzone des Servers (Fallback für Zeitpläne)" Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Berlin</Config>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Benutzer-ID für neue Dateien (Unraid: 99 = nobody)" Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Gruppen-ID für neue Dateien (Unraid: 100 = users)" Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
