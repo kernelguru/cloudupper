@@ -362,6 +362,7 @@ async function loadPicker() {
     picker.entries = r.entries;
   } catch (e) { picker.entries = []; picker.error = e.message; }
   picker.loading = false; renderPicker();
+  $("#sheetBody").scrollTop = 0;
 }
 
 function renderPicker() {
@@ -380,11 +381,13 @@ function renderPicker() {
       <div class="crumbs">${crumbs}</div>
       ${picker.loading ? `<div class="empty">Lade…</div>` : picker.error ? `<div class="empty error">${esc(picker.error)}</div>` : rows ? `<ul class="list">${rows}</ul>` : `<div class="empty">Keine Unterordner</div>`}
     </div>
-    <div class="row">
-      <input type="text" placeholder="Neuer Ordner…" id="pkNew" enterkeyhint="done">
-      <button class="btn" data-action="pk-mkdir">${icon("folderPlus")}</button>
-    </div>
-    <button class="btn primary block" data-action="pk-choose">${icon("check")} Hier speichern: ${esc(destLabel({ remote: picker.remote, path: picker.path }))}</button>`;
+    <div class="sheet-foot stack">
+      <div class="row">
+        <input type="text" placeholder="Neuer Ordner…" id="pkNew" enterkeyhint="done">
+        <button class="btn" data-action="pk-mkdir">${icon("folderPlus")}</button>
+      </div>
+      <button class="btn primary block" data-action="pk-choose">${icon("check")} <span class="ellipsis">Hier speichern: ${esc(destLabel({ remote: picker.remote, path: picker.path }))}</span></button>
+    </div>`;
 }
 
 function chooseDest(d) {
