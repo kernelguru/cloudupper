@@ -12,7 +12,7 @@ CONF="${WG_CONFIG:-/config/wireguard/wg0.conf}"
 IFACE=wg0
 STATE="${VPN_STATE_DIR:-/run/cloudupper-vpn}"
 KILLSWITCH="${VPN_KILLSWITCH:-true}"
-LAN_NETWORK="${LAN_NETWORK:-192.168.0.0/16,172.16.0.0/12,10.0.0.0/8}"
+LAN_NETWORK="${LAN_NETWORK:-192.168.0.0/16,172.16.0.0/12,10.0.0.0/8,100.64.0.0/10}"
 DRY="${DRY_RUN:-0}"
 
 log() { echo "[vpn] $*"; }
@@ -83,6 +83,8 @@ if [ "$KILLSWITCH" = "true" ]; then
   if command -v "$IP6T" >/dev/null && { [ "$DRY" = 1 ] || $IP6T -L >/dev/null 2>&1; }; then
     run $IP6T -P OUTPUT DROP
     run $IP6T -A OUTPUT -o lo -j ACCEPT
+    # Antworten auf eingehende Verbindungen (z.B. Reverse Proxy über IPv6) erlauben
+    run $IP6T -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
   fi
 fi
 
@@ -119,6 +121,27 @@ done
 for d in "${DNS4[@]}"; do run ip route replace "$d/32" dev "$IFACE"; done
 run ip route replace 0.0.0.0/1 dev "$IFACE"
 run ip route replace 128.0.0.0/1 dev "$IFACE"
+
+# Antworten auf Verbindungen, die von außen über $DEV hereinkommen (Weboberfläche,
+# Reverse Proxy, Tailscale, Port-Weiterleitung …), gehen immer über $DEV zurück –
+# unabhängig von der Absender-Adresse. Selbst aufgebaute Verbindungen bleiben im Tunnel.
+MARK=0x6a5
+TABLE=6741
+addrule() { # $1=Kette, Rest=Regel – nur anlegen, wenn noch nicht vorhanden
+  local chain="$1"; shift
+  if [ "$DRY" = 1 ] || ! $IPT -t mangle -C "$chain" "$@" 2>/dev/null; then run $IPT -t mangle -A "$chain" "$@"; fi
+}
+addrule PREROUTING -i "$DEV" -m conntrack --ctstate NEW -j CONNMARK --set-mark "$MARK"
+addrule OUTPUT -m connmark --mark "$MARK" -j MARK --set-mark "$MARK"
+[ "$DRY" = 1 ] || ip rule del fwmark "$MARK" table "$TABLE" 2>/dev/null || true
+run ip rule add fwmark "$MARK" table "$TABLE" priority 100
+run ip route replace default via "$GW" dev "$DEV" table "$TABLE"
+# Strenge Absenderprüfung würde die Antworten sonst verwerfen
+if [ "$DRY" = 1 ]; then echo "+ sysctl rp_filter=2 (falls möglich)"; else
+  for f in /proc/sys/net/ipv4/conf/all/rp_filter "/proc/sys/net/ipv4/conf/$DEV/rp_filter"; do
+    [ -w "$f" ] && echo 2 > "$f" 2>/dev/null || true
+  done
+fi
 
 # DNS über den Tunnel
 if [ "${#DNS4[@]}" -gt 0 ]; then

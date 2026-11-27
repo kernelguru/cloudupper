@@ -79,7 +79,7 @@ Bei schlechtem Routing des Providers (z. B. Vodafone → Google) kann der gesamt
 
 **Kill-Switch** (Standard: an): Fällt der Tunnel aus, wird nichts am VPN vorbei übertragen – Aufträge schlagen dann fehl, statt über die normale Leitung zu laufen. Startet das VPN gar nicht (z. B. falsche Konfiguration), beendet sich der Container mit einer Meldung im Log.
 
-Hinweise: Unraid bringt das WireGuard-Kernel-Modul mit. IPv6 wird bei aktivem VPN gesperrt. `LAN_NETWORK` legt fest, welche Netze direkt erreichbar bleiben (Standard: alle privaten Netze). Ob das VPN schneller ist, hängt vom Server ab – am besten mit einem großen Upload vergleichen.
+Hinweise: Unraid bringt das WireGuard-Kernel-Modul mit. IPv6 wird bei aktivem VPN gesperrt. Die Weboberfläche bleibt auch über Reverse Proxy, Tailscale, Cloudflare Tunnel oder eine Port-Weiterleitung erreichbar: Antworten auf Verbindungen, die von außen hereinkommen, gehen immer am Tunnel vorbei zurück. `LAN_NETWORK` legt fest, welche Netze der Container selbst direkt erreichen darf (Standard: private Netze und Tailscale). Ob das VPN schneller ist, hängt vom Server ab – am besten mit einem großen Upload vergleichen.
 
 ## Dateien auf dem Server werden nie automatisch gelöscht
 
