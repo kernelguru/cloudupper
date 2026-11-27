@@ -24,16 +24,69 @@ TABLE=6741
 
 log() { echo "[vpn] $*"; }
 die() { echo "[vpn] FEHLER: $*" >&2; exit 1; }
-run() { if [ "$DRY" = 1 ]; then echo "+ $*"; else "$@"; fi; }
+run() {
+  if [ "$DRY" = 1 ]; then echo "+ $*"; return 0; fi
+  local err
+  if ! err="$("$@" 2>&1)"; then
+    die "Befehl fehlgeschlagen: $* → $(echo "$err" | grep -v "^Try \`" | head -n2 | tr '\n' ' ')"
+  fi
+}
 quiet() { if [ "$DRY" = 1 ]; then echo "+ $*"; else "$@" 2>/dev/null || true; fi; }
 split() { tr ',' '\n' <<<"$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' || true; }
 
 # iptables-Variante wählen (nft oder legacy – je nach Kernel des Hosts)
-IPT=iptables; IP6T=ip6tables
-if [ "$DRY" != 1 ] && ! iptables -L -n >/dev/null 2>&1 && command -v iptables-legacy >/dev/null; then
-  IPT=iptables-legacy; IP6T=ip6tables-legacy
-fi
-have_ip6t() { command -v "$IP6T" >/dev/null && { [ "$DRY" = 1 ] || $IP6T -L -n >/dev/null 2>&1; }; }
+# Prüft, ob eine iptables-Variante die benötigten Erweiterungen auf diesem Kernel kann.
+# Ergebnis: CT_MATCH (conntrack oder state) und HAVE_CONNMARK (true/false)
+probe() {
+  local t="$1" ok=1
+  command -v "$t" >/dev/null || return 1
+  $t -L -n >/dev/null 2>&1 || return 1
+  $t -N CU_PROBE >/dev/null 2>&1 || { $t -F CU_PROBE; } >/dev/null 2>&1 || return 1
+  if $t -A CU_PROBE -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT >/dev/null 2>&1; then PROBE_CT="conntrack"
+  elif $t -A CU_PROBE -m state --state ESTABLISHED,RELATED -j ACCEPT >/dev/null 2>&1; then PROBE_CT="state"
+  else ok=0; fi
+  $t -A CU_PROBE -j REJECT >/dev/null 2>&1 || ok=0
+  $t -F CU_PROBE >/dev/null 2>&1; $t -X CU_PROBE >/dev/null 2>&1
+  [ "$ok" = 1 ] || return 1
+  PROBE_MARK=false
+  if $t -t mangle -N CU_PROBE >/dev/null 2>&1; then
+    local m=(-m conntrack --ctstate NEW); [ "$PROBE_CT" = state ] && m=(-m state --state NEW)
+    $t -t mangle -A CU_PROBE "${m[@]}" -j CONNMARK --set-mark 0x1 >/dev/null 2>&1 &&
+      $t -t mangle -A CU_PROBE -m connmark --mark 0x1 -j MARK --set-mark 0x1 >/dev/null 2>&1 && PROBE_MARK=true
+    $t -t mangle -F CU_PROBE >/dev/null 2>&1; $t -t mangle -X CU_PROBE >/dev/null 2>&1
+  fi
+  return 0
+}
+
+IPT=iptables; IP6T=ip6tables; CT_MATCH=(-m conntrack --ctstate); HAVE_CONNMARK=true; IPT_OK=true
+select_iptables() {
+  [ "$DRY" = 1 ] && return 0
+  local cand best="" bestmark=false bestct=""
+  for cand in iptables iptables-legacy iptables-nft; do
+    PROBE_CT=""; PROBE_MARK=false
+    if probe "$cand"; then
+      if [ -z "$best" ] || { [ "$bestmark" = false ] && [ "$PROBE_MARK" = true ]; }; then
+        best="$cand"; bestmark="$PROBE_MARK"; bestct="$PROBE_CT"
+      fi
+      [ "$PROBE_MARK" = true ] && break
+    fi
+  done
+  if [ -z "$best" ]; then IPT_OK=false; return 0; fi
+  IPT="$best"; IP6T="${best/iptables/ip6tables}"; HAVE_CONNMARK="$bestmark"
+  if [ "$bestct" = state ]; then CT_MATCH=(-m state --state); else CT_MATCH=(-m conntrack --ctstate); fi
+  log "Firewall: $IPT (${bestct}${HAVE_CONNMARK:+, connmark=$HAVE_CONNMARK})"
+}
+have_ip6t() {
+  command -v "$IP6T" >/dev/null || return 1
+  [ "$DRY" = 1 ] && return 0
+  $IP6T -L -n >/dev/null 2>&1 || return 1
+  # Kann diese Variante auch Antworten erlauben? Sonst lieber gar nichts an IPv6 ändern.
+  $IP6T -N CU_PROBE6 >/dev/null 2>&1 || return 1
+  local ok=1
+  $IP6T -A CU_PROBE6 "${CT_MATCH[@]}" ESTABLISHED,RELATED -j ACCEPT >/dev/null 2>&1 && $IP6T -A CU_PROBE6 -j REJECT >/dev/null 2>&1 || ok=0
+  $IP6T -F CU_PROBE6 >/dev/null 2>&1; $IP6T -X CU_PROBE6 >/dev/null 2>&1
+  [ "$ok" = 1 ]
+}
 
 net_defaults() {
   if [ "$DRY" = 1 ]; then
@@ -54,10 +107,18 @@ cmd_down() {
   quiet ip link del "$IFACE"                         # entfernt auch alle Routen über wg0
   [ -n "$EP_IP" ] && quiet ip route del "$EP_IP/32" via "$GW" dev "$DEV"
   for net in $(split "${NETS:-}"); do quiet ip route del "$net" via "$GW" dev "$DEV"; done
-  quiet $IPT -D OUTPUT -j CU_VPN; quiet $IPT -F CU_VPN; quiet $IPT -X CU_VPN
-  if have_ip6t; then quiet $IP6T -D OUTPUT -j CU_VPN6; quiet $IP6T -F CU_VPN6; quiet $IP6T -X CU_VPN6; fi
-  quiet $IPT -t mangle -D PREROUTING -i "$DEV" -m conntrack --ctstate NEW -j CONNMARK --set-mark "$MARK"
-  quiet $IPT -t mangle -D OUTPUT -m connmark --mark "$MARK" -j MARK --set-mark "$MARK"
+  # In allen iptables-Varianten aufräumen (falls eine andere als die gespeicherte genutzt wurde)
+  local t t6
+  for t in "$IPT" iptables iptables-legacy iptables-nft; do
+    command -v "$t" >/dev/null || continue
+    t6="${t/iptables/ip6tables}"
+    quiet $t -D OUTPUT -j CU_VPN; quiet $t -F CU_VPN; quiet $t -X CU_VPN
+    if command -v "$t6" >/dev/null; then quiet $t6 -D OUTPUT -j CU_VPN6; quiet $t6 -F CU_VPN6; quiet $t6 -X CU_VPN6; fi
+    quiet $t -t mangle -D PREROUTING -i "$DEV" -m conntrack --ctstate NEW -j CONNMARK --set-mark "$MARK"
+    quiet $t -t mangle -D PREROUTING -i "$DEV" -m state --state NEW -j CONNMARK --set-mark "$MARK"
+    quiet $t -t mangle -D OUTPUT -m connmark --mark "$MARK" -j MARK --set-mark "$MARK"
+    [ "$DRY" = 1 ] && break
+  done
   quiet ip rule del fwmark "$MARK" table "$TABLE"
   quiet ip route flush table "$TABLE"
   if [ "$DRY" = 1 ]; then echo "+ /etc/resolv.conf wiederherstellen"
@@ -101,6 +162,15 @@ cmd_up() {
   for net in $(split "$LAN_NETWORK"); do [ "$net" = "$SUBNET" ] || NETS="$NETS${NETS:+,}$net"; done
 
   log "Server: $EP_HOST ($EP_IP:$EP_PORT) · Gateway: $GW über $DEV · Kill-Switch: $KILLSWITCH"
+  select_iptables
+  [ "$DRY" = 1 ] || printf 'IPT=%q\nIP6T=%q\n' "$IPT" "$IP6T" >> "$APPLIED"
+  if [ "$IPT_OK" != true ]; then
+    if [ "$KILLSWITCH" = "true" ]; then
+      die "Keine funktionierende iptables-Variante für den Kill-Switch gefunden (Kernel-Module xt_conntrack/xt_state, xt_REJECT bzw. nft_compat fehlen?). VPN_KILLSWITCH=false würde das VPN ohne Kill-Switch starten."
+    fi
+    log "WARNUNG: iptables nicht nutzbar – VPN ohne Kill-Switch und ohne Reverse-Proxy-Rückweg."
+    HAVE_CONNMARK=false
+  fi
   if [ "$DRY" != 1 ]; then
     mkdir -p "$STATE" && chmod 755 "$STATE"
     printf 'EP_IP=%q\nGW=%q\nDEV=%q\nNETS=%q\nENDPOINT_LABEL=%q\n' "$EP_IP" "$GW" "$DEV" "$NETS" "$EP_HOST:$EP_PORT" > "$APPLIED"
@@ -112,7 +182,7 @@ cmd_up() {
     run $IPT -N CU_VPN
     run $IPT -A CU_VPN -o lo -j ACCEPT
     run $IPT -A CU_VPN -o "$IFACE" -j ACCEPT
-    run $IPT -A CU_VPN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    run $IPT -A CU_VPN "${CT_MATCH[@]}" ESTABLISHED,RELATED -j ACCEPT
     run $IPT -A CU_VPN -d "$EP_IP" -p udp --dport "$EP_PORT" -j ACCEPT
     [ -n "$SUBNET" ] && run $IPT -A CU_VPN -d "$SUBNET" -j ACCEPT
     for net in $(split "$NETS"); do run $IPT -A CU_VPN -d "$net" -j ACCEPT; done
@@ -120,10 +190,12 @@ cmd_up() {
     run $IPT -I OUTPUT 1 -j CU_VPN
     # IPv6 sperren (der Tunnel wird nur für IPv4 eingerichtet); Antworten auf
     # eingehende Verbindungen (z.B. Reverse Proxy über IPv6) bleiben erlaubt.
-    if have_ip6t; then
+    if ! have_ip6t; then
+      log "IPv6-Firewall nicht nutzbar – IPv6 wird nicht zusätzlich gesperrt (der Tunnel nutzt ohnehin nur IPv4)."
+    else
       run $IP6T -N CU_VPN6
       run $IP6T -A CU_VPN6 -o lo -j ACCEPT
-      run $IP6T -A CU_VPN6 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+      run $IP6T -A CU_VPN6 "${CT_MATCH[@]}" ESTABLISHED,RELATED -j ACCEPT
       run $IP6T -A CU_VPN6 -j REJECT
       run $IP6T -I OUTPUT 1 -j CU_VPN6
     fi
@@ -157,10 +229,14 @@ cmd_up() {
   # Antworten auf Verbindungen, die von außen über $DEV hereinkommen (Weboberfläche,
   # Reverse Proxy, Tailscale, Port-Weiterleitung …), gehen immer über $DEV zurück –
   # unabhängig von der Absender-Adresse. Selbst aufgebaute Verbindungen bleiben im Tunnel.
-  run $IPT -t mangle -A PREROUTING -i "$DEV" -m conntrack --ctstate NEW -j CONNMARK --set-mark "$MARK"
-  run $IPT -t mangle -A OUTPUT -m connmark --mark "$MARK" -j MARK --set-mark "$MARK"
-  run ip rule add fwmark "$MARK" table "$TABLE" priority 100
-  run ip route replace default via "$GW" dev "$DEV" table "$TABLE"
+  if [ "$HAVE_CONNMARK" = true ]; then
+    run $IPT -t mangle -A PREROUTING -i "$DEV" "${CT_MATCH[@]}" NEW -j CONNMARK --set-mark "$MARK"
+    run $IPT -t mangle -A OUTPUT -m connmark --mark "$MARK" -j MARK --set-mark "$MARK"
+    run ip rule add fwmark "$MARK" table "$TABLE" priority 100
+    run ip route replace default via "$GW" dev "$DEV" table "$TABLE"
+  else
+    log "HINWEIS: Kernel unterstützt CONNMARK nicht – die Weboberfläche ist bei aktivem VPN nur aus den Netzen in LAN_NETWORK erreichbar ($LAN_NETWORK)."
+  fi
   if [ "$DRY" = 1 ]; then echo "+ rp_filter=2 (falls möglich)"; else
     for f in /proc/sys/net/ipv4/conf/all/rp_filter "/proc/sys/net/ipv4/conf/$DEV/rp_filter"; do
       [ -w "$f" ] && echo 2 > "$f" 2>/dev/null || true
@@ -202,6 +278,8 @@ cmd_stats() {
   # shellcheck disable=SC1090
   [ -f "$APPLIED" ] && ep="$(. "$APPLIED"; echo "${ENDPOINT_LABEL:-}")"
   local blocking=false
+  # shellcheck disable=SC1090
+  [ -f "$APPLIED" ] && IPT="$(. "$APPLIED"; echo "${IPT:-iptables}")"
   $IPT -C OUTPUT -j CU_VPN 2>/dev/null && blocking=true
   printf '{"interface_up":%s,"endpoint":"%s","latest_handshake":%s,"rx":%s,"tx":%s,"killswitch_active":%s}\n' \
     "$up" "$ep" "${hs:-0}" "${rx:-0}" "${tx:-0}" "$blocking"
