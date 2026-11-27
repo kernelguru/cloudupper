@@ -6,13 +6,17 @@ PUID="${PUID:-99}"
 PGID="${PGID:-100}"
 umask "${UMASK:-000}"
 mkdir -p /config
-# Optionales WireGuard-VPN (z.B. Proton VPN) mit Kill-Switch – muss als root laufen
+# Optionales WireGuard-VPN (z.B. Proton VPN) mit Kill-Switch – Steuerung läuft als root
 if [ "${VPN_ENABLED:-false}" = "true" ]; then
   if [ "$(id -u)" != "0" ]; then
     echo "[vpn] FEHLER: Für das VPN muss der Container als root starten (PUID/PGID statt --user verwenden)." >&2
     exit 1
   fi
-  /usr/local/bin/cloudupper-vpn || { echo "[vpn] VPN konnte nicht gestartet werden – Container wird beendet, damit nichts am VPN vorbei übertragen wird." >&2; exit 1; }
+  # Steuerdienst starten: schaltet das VPN nach Wunsch aus der Weboberfläche ein/aus.
+  # Der zuletzt gewählte Zustand wird vor dem Start der App wiederhergestellt.
+  rm -f /run/cloudupper-vpn/ready
+  /usr/local/bin/cloudupper-vpnd &
+  for _ in $(seq 1 60); do [ -f /run/cloudupper-vpn/ready ] && break; sleep 1; done
 fi
 if [ "$(id -u)" = "0" ]; then
   # Nur das eigene appdata-Verzeichnis anpassen – deine Shares unter /data bleiben unangetastet.

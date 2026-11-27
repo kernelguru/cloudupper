@@ -578,7 +578,7 @@ function viewClouds() {
     <button class="btn primary block" data-action="connect">${icon("plus")} Cloud verbinden</button>
     ${cards || `<div class="card empty">${icon("cloud")}<br>Noch keine Cloud verbunden.</div>`}
     ${vpnCard()}
-    <div class="card stack" id="settings"><h3>${icon("gear")} Einstellungen</h3><div class="muted small">Lade…</div></div>
+    <div class="card stack" id="settings">${settingsInner()}</div>
     <p class="small muted" style="text-align:center">CloudUpper ${esc(S.status.version || "")} · rclone ${esc(S.status.rclone || "")}</p>`;
 }
 
@@ -598,9 +598,12 @@ async function renderSettings() {
     [settingsCache, providersCache] = await Promise.all([api("/settings"), api("/providers")]);
   } catch (e) { return; }
   const el = $("#settings");
-  if (!el) return;
+  if (el) el.innerHTML = settingsInner();
+}
+function settingsInner() {
+  if (!settingsCache || !providersCache) return `<h3>${icon("gear")} Einstellungen</h3><div class="muted small">Lade…</div>`;
   const s = settingsCache;
-  el.innerHTML = `<h3>${icon("gear")} Einstellungen</h3>
+  return `<h3>${icon("gear")} Einstellungen</h3>
     <label class="field">TorBox API-Key ${s.torbox_from_env ? "(aus Umgebungsvariable)" : ""}
       <input type="password" id="setTorbox" placeholder="nicht gesetzt" value="${esc(s.torbox_api_key)}" ${s.torbox_from_env ? "disabled" : ""}></label>
     <details><summary>Eigene OAuth-Apps (für „Mit … anmelden“)</summary><div class="stack">
@@ -905,39 +908,68 @@ window.addEventListener("hashchange", () => {
 // ================================================================== VPN
 let vpnCheckedAt = 0;
 let vpnIp = null;
+let vpnFast = null;
+const vpnBusy = (v) => v && (v.state === "starting" || v.state === "stopping");
 async function refreshVpn(force = false) {
-  if (!S.status.vpn?.enabled) return;
+  if (!S.status.vpn?.available) return;
   if (!force && Date.now() - vpnCheckedAt < 20000) return;
   vpnCheckedAt = Date.now();
   try {
-    const was = S.status.vpn.connected;
+    const before = JSON.stringify([S.status.vpn.state, S.status.vpn.connected]);
     S.status.vpn = await api("/vpn");
-    if (was !== S.status.vpn.connected && ["upload", "torbox", "clouds"].includes(S.view)) render();
+    if (S.view === "clouds") updateVpnCard();
+    else if (before !== JSON.stringify([S.status.vpn.state, S.status.vpn.connected]) && ["upload", "torbox"].includes(S.view)) render();
   } catch { /* egal */ }
+}
+// Nach dem Umschalten kurz schneller abfragen, bis der Dienst fertig ist
+function followVpn() {
+  clearTimeout(vpnFast);
+  let n = 0;
+  const step = async () => {
+    await refreshVpn(true);
+    if (vpnBusy(S.status.vpn) && ++n < 40) vpnFast = setTimeout(step, 1500);
+    else if (S.status.vpn?.state === "up") toast("VPN verbunden", "ok");
+    else if (S.status.vpn?.state === "error") toast("VPN-Fehler: " + (S.status.vpn.message || ""), "err");
+    else if (S.status.vpn?.state === "off") toast("VPN aus – Verkehr läuft direkt", "ok");
+  };
+  vpnFast = setTimeout(step, 1200);
+}
+function updateVpnCard() {
+  const el = $("#vpnCard");
+  if (el) el.outerHTML = vpnCard(); else if (S.view === "clouds") render();
 }
 function vpnBanner() {
   const v = S.status.vpn;
-  if (!v?.enabled || v.connected) return "";
-  return `<div class="banner">${icon("shield")} <b>VPN nicht verbunden.</b> Der Kill-Switch blockiert Übertragungen ins Internet, bis der Tunnel steht. <a href="#clouds" data-action="nav" data-view="clouds">Details</a></div>`;
+  if (!v?.available || v.desired !== "on" || v.connected) return "";
+  const why = vpnBusy(v) ? "VPN wird verbunden …" : "VPN nicht verbunden.";
+  return `<div class="banner">${icon("shield")} <b>${why}</b> ${v.killswitch ? "Der Kill-Switch blockiert Übertragungen ins Internet, bis der Tunnel steht." : ""} <a href="#clouds" data-action="nav" data-view="clouds">Details</a></div>`;
 }
 function vpnCard() {
   const v = S.status.vpn;
-  if (!v?.enabled) {
+  if (!v?.available) {
     return `<details class="card"><summary>${icon("shield")} VPN (WireGuard, z.B. Proton VPN)</summary><div class="small muted stack">
-      <p style="margin:0">Leitet den gesamten Verkehr des Containers (Uploads, TorBox, Clouds) durch einen WireGuard-Tunnel – hilfreich bei schlechtem Routing des Providers. Mit Kill-Switch: Fällt der Tunnel aus, wird nichts am VPN vorbei übertragen.</p>
+      <p style="margin:0">Leitet bei Bedarf den gesamten Verkehr des Containers (Uploads, TorBox, Clouds) durch einen WireGuard-Tunnel – hilfreich bei schlechtem Routing des Providers. Ein- und ausschalten geht dann hier per Schalter.</p>
       <ol style="margin:0;padding-left:18px"><li>Bei Proton VPN: <a href="https://account.protonvpn.com/downloads" target="_blank" rel="noopener">Downloads → WireGuard-Konfiguration</a> erstellen (Plattform „Router“, nahen Server wählen).</li>
       <li>Datei als <code>wg0.conf</code> nach <code>/config/wireguard/</code> (Unraid: <code>appdata/cloudupper/wireguard/</code>) legen.</li>
       <li>Im Container <code>VPN_ENABLED=true</code> setzen, <code>--cap-add=NET_ADMIN</code> ergänzen und neu starten.</li></ol></div></details>`;
   }
-  const ok = v.connected;
-  const age = v.handshake_age != null ? (v.handshake_age < 120 ? `vor ${v.handshake_age} s` : `vor ${Math.round(v.handshake_age / 60)} min`) : "noch keiner";
-  return `<div class="card stack" style="gap:8px">
-    <div class="row"><div class="logo" style="width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;background:${ok ? "var(--ok)" : "var(--err)"}">${icon("shield")}</div>
-      <div class="grow"><div class="val"><b>VPN ${ok ? "verbunden" : "nicht verbunden"}</b></div><div class="small muted">${esc(v.endpoint || v.detail || "")}</div></div>
-      <span class="chip ${v.killswitch ? "ok" : "warn"}">Kill-Switch ${v.killswitch ? "an" : "aus"}</span></div>
-    <div class="small muted">Letzter Handshake: ${age} · ↓ ${fmtBytes(v.rx)} · ↑ ${fmtBytes(v.tx)}</div>
+  const on = v.desired === "on";
+  const busy = vpnBusy(v);
+  const st = busy ? ["run", v.state === "starting" ? "verbindet …" : "schaltet aus …"]
+    : v.state === "error" ? ["err", "Fehler"]
+      : v.connected ? ["ok", "verbunden"]
+        : on ? ["warn", "keine Verbindung"] : ["", "aus"];
+  const color = v.connected ? "var(--ok)" : v.state === "error" ? "var(--err)" : busy ? "var(--accent)" : "var(--muted)";
+  const age = v.handshake_age != null ? (v.handshake_age < 120 ? `vor ${v.handshake_age} s` : `vor ${Math.round(v.handshake_age / 60)} min`) : "–";
+  return `<div class="card stack" id="vpnCard" style="gap:10px">
+    <div class="row"><div class="logo" style="width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;background:${color}">${icon("shield", busy ? "spin" : "")}</div>
+      <div class="grow"><div class="val"><b>VPN</b> <span class="chip ${st[0]}">${st[1]}</span></div>
+        <div class="small muted">${on ? "Gesamter Verkehr über den Tunnel" : "Verkehr läuft direkt über deine Leitung"}</div></div>
+      <label class="switch" title="VPN ein/aus"><input type="checkbox" data-action="vpn-toggle" ${on ? "checked" : ""} ${busy ? "disabled" : ""}><span></span></label></div>
+    ${v.message ? `<div class="small ${v.state === "error" ? "error" : "muted"}">${esc(v.message)}</div>` : ""}
+    ${on && !busy ? `<div class="small muted">${esc(v.endpoint || "")} · Handshake: ${age} · ↓ ${fmtBytes(v.rx)} · ↑ ${fmtBytes(v.tx)} · Kill-Switch ${v.killswitch_active ? "aktiv" : "aus"}</div>` : ""}
     ${vpnIp ? `<div class="small">Öffentliche IP: <b>${esc(vpnIp.ip)}</b> (${esc(vpnIp.country || "?")}, ${esc(vpnIp.colo || "")})</div>` : ""}
-    <button class="btn sm" data-action="vpn-check">${icon("search")} Öffentliche IP prüfen</button>
+    <button class="btn sm" data-action="vpn-check" ${busy ? "disabled" : ""}>${icon("search")} Öffentliche IP prüfen</button>
   </div>`;
 }
 
@@ -1185,9 +1217,20 @@ async function exDelete(items) {
 const exItemOf = (el) => [{ path: el.dataset.path, dir: el.dataset.dir === "1" }];
 
 Object.assign(actions, {
+  "vpn-toggle": async (el) => {
+    const enable = !(S.status.vpn?.desired === "on");
+    const running = S.jobs.filter((j) => j.status === "running").length;
+    if (running && !confirm(`${running} laufende Übertragung(en) werden beim ${enable ? "Einschalten" : "Ausschalten"} des VPN unterbrochen und müssen danach erneut gestartet werden. Fortfahren?`)) { updateVpnCard(); return; }
+    try {
+      S.status.vpn = await api("/vpn", { body: { enabled: enable } });
+      vpnIp = null;
+      updateVpnCard();
+      followVpn();
+    } catch (e) { toast(e.message, "err"); updateVpnCard(); }
+  },
   "vpn-check": async () => {
     try { vpnIp = await api("/vpn/check"); } catch (e) { vpnIp = null; toast(e.message, "err"); }
-    await refreshVpn(true); render();
+    await refreshVpn(true); updateVpnCard();
   },
   "jobs-tab": async (el) => { S.jobsTab = el.dataset.tab; render(); if (S.jobsTab === "schedules") { S.schedules = await api("/schedules"); render(); } },
   "upload-plan": () => {

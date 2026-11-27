@@ -108,24 +108,55 @@ async def logout(response: Response):
 VPN_STATUS = Path(os.getenv("VPN_STATE_DIR", "/run/cloudupper-vpn")) / "status.json"
 
 
+VPN_DESIRED = config.CONFIG_DIR / "vpn.desired"
+
+
 def vpn_state() -> dict:
-    enabled = os.getenv("VPN_ENABLED", "false").lower() == "true"
-    if not enabled:
-        return {"enabled": False}
+    """Status des optionalen VPN (Steuerdienst schreibt status.json)."""
+    import time as _t
+    if os.getenv("VPN_ENABLED", "false").lower() != "true":
+        return {"available": False}
+    try:
+        desired = VPN_DESIRED.read_text().strip()
+    except OSError:
+        desired = "off"
+    desired = "on" if desired == "on" else "off"
     try:
         st = json.loads(VPN_STATUS.read_text())
     except (OSError, json.JSONDecodeError):
-        return {"enabled": True, "connected": False, "detail": "Kein Status (VPN startet noch?)"}
-    import time as _t
-    hs = int(st.get("latest_handshake") or 0)
-    # WireGuard erneuert den Handshake alle ~2 Minuten, solange Daten fließen
-    st["connected"] = bool(st.get("interface_up")) and hs > 0 and _t.time() - hs < 300
+        return {"available": True, "desired": desired, "state": "starting", "connected": False,
+                "message": "VPN-Dienst startet …"}
+    wg = st.get("wg") or {}
+    hs = int(wg.get("latest_handshake") or 0)
+    st["desired"] = desired
+    # Wechsel angefordert, der Dienst übernimmt innerhalb von ~2 Sekunden
+    if desired == "on" and st.get("state") in ("off", "stopping"):
+        st["state"] = "starting"
+    elif desired == "off" and st.get("state") in ("up", "error", "starting"):
+        st["state"] = "stopping"
+    st["connected"] = st.get("state") == "up" and bool(wg.get("interface_up")) and hs > 0 and _t.time() - hs < 300
     st["handshake_age"] = int(_t.time() - hs) if hs else None
+    st.update({k: wg.get(k) for k in ("endpoint", "rx", "tx", "killswitch_active")})
     return st
 
 
 @app.get("/api/vpn")
 async def vpn_status():
+    return vpn_state()
+
+
+class VpnToggle(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/vpn")
+async def vpn_toggle(body: VpnToggle):
+    if os.getenv("VPN_ENABLED", "false").lower() != "true":
+        raise HTTPException(400, "Die VPN-Funktion ist im Container nicht aktiviert (VPN_ENABLED=true und --cap-add=NET_ADMIN)")
+    tmp = VPN_DESIRED.with_suffix(".tmp")
+    tmp.write_text("on\n" if body.enabled else "off\n")
+    tmp.replace(VPN_DESIRED)
+    log.info("VPN %s angefordert", "Einschalten" if body.enabled else "Ausschalten")
     return vpn_state()
 
 

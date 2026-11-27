@@ -29,7 +29,8 @@ COPY app ./app
 
 COPY entrypoint.sh /entrypoint.sh
 COPY vpn.sh /usr/local/bin/cloudupper-vpn
-RUN chmod +x /entrypoint.sh /usr/local/bin/cloudupper-vpn
+COPY vpnd.sh /usr/local/bin/cloudupper-vpnd
+RUN chmod +x /entrypoint.sh /usr/local/bin/cloudupper-vpn /usr/local/bin/cloudupper-vpnd
 
 VOLUME ["/config", "/data"]
 EXPOSE 8080

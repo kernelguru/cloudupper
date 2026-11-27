@@ -65,10 +65,13 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/remotes)" = 401
           docker exec cu rclone version
           # VPN-Skript im Trockenlauf (prüft Werkzeuge und Konfig-Verarbeitung im Image)
-          docker exec cu sh -c 'mkdir -p /tmp/wg && printf "[Interface]\nprivatekey = AAAA\nAddress = 10.2.0.2/32, 2a07:b944::2:2/128\nDNS = 10.2.0.1\n\n[Peer]\nPublicKey = BBBB\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = 185.159.157.10:51820\n" > /tmp/wg/wg0.conf && DRY_RUN=1 WG_CONFIG=/tmp/wg/wg0.conf cloudupper-vpn' | tee /tmp/vpn.txt
+          docker exec cu sh -c 'mkdir -p /tmp/wg && printf "[Interface]\nprivatekey = AAAA\nAddress = 10.2.0.2/32, 2a07:b944::2:2/128\nDNS = 10.2.0.1\n\n[Peer]\nPublicKey = BBBB\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = 185.159.157.10:51820\n" > /tmp/wg/wg0.conf && DRY_RUN=1 WG_CONFIG=/tmp/wg/wg0.conf cloudupper-vpn up' | tee /tmp/vpn.txt
           grep -q "privatekey = \*\*\*" /tmp/vpn.txt
           grep -q "ip route replace 0.0.0.0/1 dev wg0" /tmp/vpn.txt
           grep -q "CONNMARK --set-mark" /tmp/vpn.txt
+          docker exec cu sh -c 'DRY_RUN=1 cloudupper-vpn down' | tee /tmp/vpn-down.txt
+          grep -q "iptables -D OUTPUT -j CU_VPN" /tmp/vpn-down.txt
+          docker exec cu sh -c 'command -v cloudupper-vpnd'
           docker exec cu sh -c 'command -v wg && command -v ip && command -v iptables'
           docker logs cu
 

@@ -74,10 +74,12 @@ Bei schlechtem Routing des Providers (z. B. Vodafone → Google) kann der gesamt
 
 1. Bei Proton VPN unter **[Downloads → WireGuard-Konfiguration](https://account.protonvpn.com/downloads)** eine Konfiguration erstellen: Plattform „Router“ oder „Linux“, einen **nahen Server** (z. B. DE/NL/CH) wählen. NetShield aus, „Moderate NAT“ und Port-Forwarding werden nicht benötigt.
 2. Die Datei als `wg0.conf` nach `/mnt/user/appdata/cloudupper/wireguard/` legen (Compose: `./config/wireguard/wg0.conf`).
-3. Im Template **VPN aktivieren = true** setzen. `--cap-add=NET_ADMIN` steht bereits in den Extra Parameters. Container neu starten.
-4. Unter **Clouds** zeigt die VPN-Karte Status, letzten Handshake und Datenmenge; „Öffentliche IP prüfen“ zeigt, mit welcher IP der Container ins Internet geht.
+3. Im Template **VPN-Funktion = true** setzen. `--cap-add=NET_ADMIN` steht bereits in den Extra Parameters. Container neu starten.
+4. Unter **Clouds** das VPN per **Schalter ein- und ausschalten** – nur bei Bedarf (Standard: aus). Der gewählte Zustand bleibt nach einem Neustart erhalten. Die Karte zeigt Status, letzten Handshake und Datenmenge; „Öffentliche IP prüfen“ zeigt, mit welcher IP der Container ins Internet geht.
 
-**Kill-Switch** (Standard: an): Fällt der Tunnel aus, wird nichts am VPN vorbei übertragen – Aufträge schlagen dann fehl, statt über die normale Leitung zu laufen. Startet das VPN gar nicht (z. B. falsche Konfiguration), beendet sich der Container mit einer Meldung im Log.
+Beim Umschalten werden laufende Übertragungen unterbrochen (die App fragt vorher nach) und können danach mit „Erneut“ fortgesetzt werden.
+
+**Kill-Switch** (Standard: an): Fällt der Tunnel aus, wird nichts am VPN vorbei übertragen – Aufträge schlagen dann fehl, statt über die normale Leitung zu laufen. Kommt keine Verbindung zustande (z. B. falsche Konfiguration), zeigt die VPN-Karte den Fehler, der Kill-Switch bleibt aktiv, bis du das VPN ausschaltest. Details stehen im Container-Log (Zeilen mit `[vpn]`).
 
 Hinweise: Unraid bringt das WireGuard-Kernel-Modul mit. IPv6 wird bei aktivem VPN gesperrt. Die Weboberfläche bleibt auch über Reverse Proxy, Tailscale, Cloudflare Tunnel oder eine Port-Weiterleitung erreichbar: Antworten auf Verbindungen, die von außen hereinkommen, gehen immer am Tunnel vorbei zurück. `LAN_NETWORK` legt fest, welche Netze der Container selbst direkt erreichen darf (Standard: private Netze und Tailscale). Ob das VPN schneller ist, hängt vom Server ab – am besten mit einem großen Upload vergleichen.
 
